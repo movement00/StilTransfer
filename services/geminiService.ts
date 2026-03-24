@@ -462,7 +462,7 @@ export const generateSmartSearchQueries = async (brand: Brand): Promise<string[]
   `;
 
   const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash-preview-05-20',
+    model: 'gemini-2.5-flash',
     contents: prompt,
     config: {
       responseMimeType: 'application/json',
@@ -542,7 +542,7 @@ export const scoreDesignQuality = async (
   });
 
   const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash-preview-05-20',
+    model: 'gemini-2.5-flash',
     contents: { parts },
     config: {
       responseMimeType: 'application/json',
@@ -645,7 +645,7 @@ export const generatePipelineTopics = async (
   `;
 
   const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash-preview-05-20',
+    model: 'gemini-2.5-flash',
     contents: prompt,
     config: {
       responseMimeType: 'application/json',
@@ -732,7 +732,7 @@ export const reviewDesignQuality = async (
   `;
 
   const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash-preview-05-20',
+    model: 'gemini-2.5-flash',
     contents: [
       {
         parts: [
