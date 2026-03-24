@@ -283,7 +283,7 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
       referenceImages,
       productImages,
       autoRevise,
-      revisionPrompt: autoRevise ? revisionPrompt : undefined,
+      revisionPrompt: undefined,
       saveAsTemplate,
       createdAt: Date.now(),
     };
@@ -552,8 +552,8 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
             {/* Auto Revise Toggle */}
             <div className="flex items-center justify-between mt-4 p-3 bg-lumina-950 rounded-lg border border-lumina-800">
               <div>
-                <p className="text-sm text-white">Otomatik Revizyon</p>
-                <p className="text-xs text-slate-500">Her görseli otomatik iyileştir</p>
+                <p className="text-sm text-white">AI Tasarım Denetimi</p>
+                <p className="text-xs text-slate-500">Tipografi, hiyerarşi, renk uyumu otomatik kontrol</p>
               </div>
               <button
                 onClick={() => setAutoRevise(!autoRevise)}
@@ -565,14 +565,12 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
             </div>
 
             {autoRevise && (
-              <textarea
-                value={revisionPrompt}
-                onChange={e => setRevisionPrompt(e.target.value)}
-                placeholder="Revizyon talimatı: Örn. 'Renkleri daha canlı yap, logoyu büyüt'"
-                rows={2}
-                className="w-full mt-2 bg-lumina-950 border border-lumina-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-lumina-gold/50 resize-none"
-                disabled={isRunning}
-              />
+              <div className="mt-2 p-2.5 bg-indigo-500/10 border border-indigo-500/20 rounded-lg">
+                <p className="text-xs text-indigo-300">
+                  AI Kreatif Direktör her görseli denetleyecek: tipografi, görsel hiyerarşi,
+                  renk dağılımı, marka uyumu ve genel kalite. 85/100 altı görseller otomatik revize edilir.
+                </p>
+              </div>
             )}
 
             {/* Save as Template Toggle */}
@@ -716,6 +714,24 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
                         </div>
                       )}
 
+                      {/* Design Review Score Badge */}
+                      {result.designReview && (
+                        <div className={`absolute top-2 right-2 px-1.5 py-0.5 rounded text-[10px] font-bold backdrop-blur-sm ${
+                          result.designReview.score >= 85 ? 'bg-emerald-500/80 text-white' :
+                          result.designReview.score >= 70 ? 'bg-amber-500/80 text-white' :
+                          'bg-red-500/80 text-white'
+                        }`} title={result.designReview.issues.join('\n')}>
+                          {result.designReview.score}/100
+                        </div>
+                      )}
+
+                      {/* Revised badge */}
+                      {result.revisedImageBase64 && (
+                        <div className="absolute top-2 left-2 px-1.5 py-0.5 rounded text-[10px] font-medium bg-indigo-500/80 text-white backdrop-blur-sm">
+                          Revize
+                        </div>
+                      )}
+
                       {/* Download overlay */}
                       {(result.revisedImageBase64 || result.generatedImageBase64) && (
                         <div className="absolute inset-0 bg-black/50 opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center">
@@ -733,21 +749,32 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
                     {/* Caption */}
                     <div className="p-2">
                       <p className="text-xs text-white truncate" title={result.topic}>{result.topic}</p>
-                      <div className="flex items-center gap-1 mt-1">
-                        <span className={`inline-block w-1.5 h-1.5 rounded-full ${
-                          result.status === 'completed' ? 'bg-emerald-400' :
-                          result.status === 'failed' ? 'bg-red-400' :
-                          result.status === 'pending' ? 'bg-slate-600' :
-                          'bg-blue-400 animate-pulse'
-                        }`} />
-                        <span className="text-[10px] text-slate-500">
-                          {result.status === 'completed' ? 'Tamamlandı' :
-                           result.status === 'failed' ? 'Başarısız' :
-                           result.status === 'generating' ? 'Üretiliyor' :
-                           result.status === 'revising' ? 'Revize ediliyor' :
-                           result.status === 'analyzing' ? 'Analiz ediliyor' :
-                           'Bekliyor'}
-                        </span>
+                      <div className="flex items-center justify-between mt-1">
+                        <div className="flex items-center gap-1">
+                          <span className={`inline-block w-1.5 h-1.5 rounded-full ${
+                            result.status === 'completed' ? 'bg-emerald-400' :
+                            result.status === 'failed' ? 'bg-red-400' :
+                            result.status === 'pending' ? 'bg-slate-600' :
+                            'bg-blue-400 animate-pulse'
+                          }`} />
+                          <span className="text-[10px] text-slate-500">
+                            {result.status === 'completed' ? 'Tamamlandı' :
+                             result.status === 'failed' ? 'Başarısız' :
+                             result.status === 'generating' ? 'Üretiliyor' :
+                             result.status === 'revising' ? 'Denetleniyor' :
+                             result.status === 'analyzing' ? 'Analiz ediliyor' :
+                             'Bekliyor'}
+                          </span>
+                        </div>
+                        {result.designReview && result.designReview.issues.length > 0 && (
+                          <button
+                            onClick={() => alert(result.designReview!.issues.join('\n• '))}
+                            className="text-[10px] text-indigo-400 hover:text-indigo-300"
+                            title="Denetim detaylarını gör"
+                          >
+                            Detay
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>

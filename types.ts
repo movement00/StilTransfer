@@ -133,6 +133,13 @@ export interface PipelineRun {
   completedItems: number;
 }
 
+export interface DesignReviewResult {
+  score: number;
+  needsRevision: boolean;
+  issues: string[];
+  revisionPrompt: string;
+}
+
 export interface PipelineResult {
   id: string;
   topic: string;
@@ -140,6 +147,7 @@ export interface PipelineResult {
   referenceImageId: string;
   generatedImageBase64?: string;
   revisedImageBase64?: string;
+  designReview?: DesignReviewResult;
   status: 'pending' | 'analyzing' | 'generating' | 'revising' | 'completed' | 'failed';
   error?: string;
   savedAsTemplateId?: string;
