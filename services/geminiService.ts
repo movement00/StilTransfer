@@ -603,28 +603,45 @@ export const generatePipelineTopics = async (
   };
   const format = formatMap[aspectRatio] || 'sosyal medya gönderi';
 
+  const today = new Date();
+  const monthNames = ['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
+  const currentMonth = monthNames[today.getMonth()];
+  const currentYear = today.getFullYear();
+
   const prompt = `
-    Sen dünya çapında ödüllü bir sosyal medya içerik stratejistisin.
+    Sen dünyanın en büyük reklam ajanslarında (Wieden+Kennedy, Ogilvy, BBDO) çalışmış,
+    Cannes Lions ödüllü bir Kreatif Direktör ve Sosyal Medya Stratejistisin.
 
     MARKA BİLGİSİ:
     - İsim: ${brand.name}
     - Sektör: ${brand.industry}
-    - Açıklama: ${brand.description || 'Yok'}
-    - Ton: ${brand.tone}
-    - Renkler: ${brand.palette.map(c => `${c.name} (${c.hex})`).join(', ')}
+    - Açıklama: ${brand.description || 'Belirtilmemiş'}
+    - Marka Tonu: ${brand.tone}
+    - Renk Paleti: ${brand.palette.map(c => `${c.name} (${c.hex})`).join(', ')}
 
+    TARİH: ${currentMonth} ${currentYear}
     FORMAT: ${format} (${aspectRatio})
 
-    GÖREV: Bu marka için tam olarak ${count} adet sosyal medya içerik konusu üret.
+    GÖREV: Bu marka için tam olarak ${count} adet REKLAM GÖRSELİ KONUSU üret.
+    Her konu bir tasarımcıya brief olarak verilecek — yani görsel olarak tasarlanabilir,
+    somut ve spesifik olmalı.
 
-    KURALLAR:
-    1. Her konu kısa ve görsel tasarım için uygun olmalı (1-2 cümle max)
-    2. Konular çeşitli olmalı: tanıtım, kampanya, motivasyon, bilgi, etkileşim, sezonsal
-    3. Markanın sektörüne ve tonuna uygun olmalı
-    4. Türkçe yaz
-    5. Her konu bir sosyal medya görselinin başlığı/teması olacak
-    6. Gerçekçi ve uygulanabilir konular olsun
-    7. Güncel trendleri ve sezonsal fırsatları dahil et
+    ÖNEMLİ KURALLAR:
+    1. Her konu bir REKLAM GÖRSELİ teması olacak (poster, banner, sosyal medya görseli)
+    2. Soyut değil SOMUT ol: "Yaz kampanyası" yerine "${brand.name} Yaz İndirimi — Seçili Ürünlerde %40'a Varan Fırsatlar" gibi
+    3. Her konuda markanın sektörüne (${brand.industry}) özgü ürün/hizmet/değer önerisi olsun
+    4. Konu çeşitliliği sağla:
+       - Ürün/hizmet tanıtımı (en az 2)
+       - Kampanya/indirim/fırsat görseli (en az 1)
+       - Motivasyonel/ilham verici paylaşım (en az 1)
+       - Sezonsal/güncel etkinlik (${currentMonth} ${currentYear} için uygun)
+       - Müşteri güveni/sosyal kanıt (referans, başarı hikayesi)
+       - Bilgilendirici/eğitici içerik (sektörel ipucu, nasıl yapılır)
+    5. Her konu 1-2 cümle, Türkçe
+    6. Görselde kullanılacak ana mesaj/slogan önerisi de konuya dahil olsun
+    7. Markanın tonuna (${brand.tone}) sadık kal
+    8. Konular birbirinden FARKLI olsun, tekrar etme
+    9. Gerçek bir markanın gerçekten paylaşabileceği, profesyonel konular olsun
   `;
 
   const response = await ai.models.generateContent({
@@ -649,4 +666,107 @@ export const generatePipelineTopics = async (
   if (!text) return [];
   const parsed = JSON.parse(text);
   return (parsed.topics || []).slice(0, count);
+};
+
+// ══════════════════════════════════════════════════
+// 8. Design Review Agent - World-class design eye
+// ══════════════════════════════════════════════════
+export interface DesignReview {
+  score: number; // 0-100
+  needsRevision: boolean;
+  issues: string[];
+  revisionPrompt: string; // auto-generated revision instructions
+}
+
+export const reviewDesignQuality = async (
+  imageBase64: string,
+  brand: Brand,
+  topic: string
+): Promise<DesignReview> => {
+  const ai = getAI();
+
+  const prompt = `
+    Sen dünyanın en prestijli reklam ajanslarında çalışmış, Cannes Lions, D&AD, One Show ödüllü bir
+    Kreatif Direktörsün. Elindeki görseli profesyonel bir tasarım denetimine tabi tut.
+
+    MARKA: ${brand.name} (${brand.industry})
+    KONU: ${topic}
+    MARKA RENKLERİ: ${brand.palette.map(c => `${c.name}: ${c.hex}`).join(', ')}
+
+    AŞAĞIDAKİ KRİTERLERE GÖRE DEĞERLENDİR (her biri 0-100):
+
+    1. TİPOGRAFİ (Ağırlık: %20)
+       - Font seçimi marka tonuna uygun mu?
+       - Okunabilirlik: boyut, kontrast, satır aralığı
+       - Hiyerarşi: başlık > alt başlık > gövde metin düzgün mü?
+       - Metin hizalama ve boşluklar tutarlı mı?
+       - Yazım/gramer hatası var mı?
+
+    2. GÖRSEL HİYERARŞİ & KOMPOZİSYON (Ağırlık: %25)
+       - Göz akışı mantıklı mı? (Z-pattern, F-pattern veya merkezi odak)
+       - Ana mesaj ilk 2 saniyede okunabiliyor mu?
+       - CTA (call-to-action) yeterince belirgin mi?
+       - Boşluk (whitespace) dengesi: sıkışık mı yoksa çok boş mu?
+       - Öğeler arası alignment (hizalama) düzgün mü?
+
+    3. RENK DAĞILIMI & MARKA UYUMU (Ağırlık: %25)
+       - Marka renkleri doğru kullanılmış mı? (60-30-10 kuralı)
+       - Kontrast yeterli mi? (WCAG standartları)
+       - Renk harmonisi sağlanmış mı?
+       - Marka kimliğiyle uyumlu mu?
+       - Logo görünür ve doğru konumda mı?
+
+    4. GENEL TASARIM KALİTESİ (Ağırlık: %30)
+       - Profesyonel görünüm: ajans kalitesinde mi yoksa amatör mü?
+       - Görsel netlik ve çözünürlük
+       - Tutarlılık: tüm öğeler bir bütün oluşturuyor mu?
+       - Sektöre uygunluk (${brand.industry})
+       - Sosyal medya platformuna uygunluk
+       - Duygusal etki ve dikkat çekicilik
+
+    PUANLAMA: 85+ = mükemmel (revizyon gerekmez), 70-84 = iyi ama iyileştirilebilir, <70 = revizyon gerekli.
+
+    ÖNEMLİ: Eğer puan 85'in altındaysa, tespit ettiğin sorunları düzeltmek için Türkçe,
+    net ve spesifik bir revizyon talimatı yaz. Bu talimat doğrudan bir görsel düzenleme AI'ına
+    gönderilecek, o yüzden "şunu yap, bunu değiştir" formatında yaz.
+  `;
+
+  const response = await ai.models.generateContent({
+    model: 'gemini-2.5-flash-preview-05-20',
+    contents: [
+      {
+        parts: [
+          { inlineData: { mimeType: 'image/png', data: imageBase64 } },
+          { text: prompt }
+        ]
+      }
+    ],
+    config: {
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          score: { type: Type.NUMBER },
+          needsRevision: { type: Type.BOOLEAN },
+          issues: {
+            type: Type.ARRAY,
+            items: { type: Type.STRING },
+          },
+          revisionPrompt: { type: Type.STRING },
+        },
+        required: ['score', 'needsRevision', 'issues', 'revisionPrompt'],
+      },
+    },
+  });
+
+  const text = response.text;
+  if (!text) return { score: 75, needsRevision: true, issues: ['Değerlendirme yapılamadı'], revisionPrompt: 'Genel kaliteyi artır, tipografiyi iyileştir, renk dengesini düzelt.' };
+
+  const parsed = JSON.parse(text);
+  return {
+    score: parsed.score ?? 75,
+    needsRevision: parsed.needsRevision ?? (parsed.score < 85),
+    issues: parsed.issues || [],
+    revisionPrompt: parsed.revisionPrompt || '',
+  };
 };

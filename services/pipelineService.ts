@@ -4,7 +4,8 @@ import {
   PipelineResult, PipelineImage, SavedTemplate, GeneratedAsset
 } from '../types';
 import {
-  analyzeImageStyle, matchTopicsToStyles, generateBrandedImage, reviseGeneratedImage
+  analyzeImageStyle, matchTopicsToStyles, generateBrandedImage, reviseGeneratedImage,
+  reviewDesignQuality, DesignReview
 } from './geminiService';
 
 type PipelineEventType = 'step-update' | 'result-update' | 'run-update' | 'log';
@@ -83,7 +84,7 @@ export class PipelineService {
       { id: 'analyze', name: 'Stil Analizi', description: 'Referans görseller analiz ediliyor', status: 'idle', progress: 0 },
       { id: 'match', name: 'Akıllı Eşleştirme', description: 'Konular en uygun stillerle eşleştiriliyor', status: 'idle', progress: 0 },
       { id: 'generate', name: 'Görsel Üretimi', description: 'Markalı görseller üretiliyor', status: 'idle', progress: 0 },
-      { id: 'revise', name: 'Otomatik Revizyon', description: 'Görseller revize ediliyor', status: 'idle', progress: 0 },
+      { id: 'revise', name: 'AI Tasarım Denetimi', description: 'Tipografi, hiyerarşi, renk uyumu kontrol ediliyor', status: 'idle', progress: 0 },
       { id: 'save', name: 'Kayıt & Arşiv', description: 'Sonuçlar kaydediliyor', status: 'idle', progress: 0 },
     ];
 
@@ -128,8 +129,8 @@ export class PipelineService {
       await this.stepGenerate(config, brand, analyses, matches, signal);
 
       // ===== STEP 4: REVISE (optional) =====
-      if (config.autoRevise && config.revisionPrompt) {
-        await this.stepRevise(config.revisionPrompt, signal);
+      if (config.autoRevise) {
+        await this.stepRevise(brand, signal);
       }
 
       // ===== STEP 5: SAVE (optional) =====
@@ -297,46 +298,74 @@ export class PipelineService {
     this.log('Görsel üretimi tamamlandı.');
   }
 
-  // ===== STEP 4: Auto-revise generated images =====
-  private async stepRevise(revisionPrompt: string, signal: AbortSignal): Promise<void> {
+  // ===== STEP 4: Auto-revise with AI Design Review Agent =====
+  private async stepRevise(brand: Brand, signal: AbortSignal): Promise<void> {
     this.updateStep('revise', { status: 'running', startedAt: Date.now() });
-    this.log('Otomatik revizyon başlıyor...');
+    this.log('🔍 Tasarım Denetim Ajanı devrede — her görsel profesyonel kriterlere göre değerlendiriliyor...');
 
     const completedResults = this.currentRun!.results.filter(
       r => r.status === 'completed' && r.generatedImageBase64
     );
+
+    let revisedCount = 0;
+    let skippedCount = 0;
 
     for (let i = 0; i < completedResults.length; i++) {
       if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
 
       const result = completedResults[i];
       this.updateResult(result.id, { status: 'revising' });
-      this.log(`Revize ediliyor (${i + 1}/${completedResults.length}): "${result.topic}"`);
+      this.log(`Denetleniyor (${i + 1}/${completedResults.length}): "${result.topic}"`);
 
       try {
-        const revised = await reviseGeneratedImage(
+        // Step 4a: AI Design Review — evaluate against world-class design standards
+        const review: DesignReview = await reviewDesignQuality(
           result.generatedImageBase64!,
-          revisionPrompt,
-          null
+          brand,
+          result.topic
         );
 
-        this.updateResult(result.id, {
-          status: 'completed',
-          revisedImageBase64: revised,
-        });
+        this.log(`  → Puan: ${review.score}/100 ${review.score >= 85 ? '✓ Mükemmel' : '⚠ Revizyon gerekli'}`);
+        if (review.issues.length > 0) {
+          this.log(`  → Sorunlar: ${review.issues.join('; ')}`);
+        }
+
+        // Step 4b: If score below threshold, auto-revise
+        if (review.needsRevision && review.revisionPrompt) {
+          this.log(`  → Otomatik revize ediliyor...`);
+
+          const revised = await reviseGeneratedImage(
+            result.generatedImageBase64!,
+            review.revisionPrompt,
+            null
+          );
+
+          this.updateResult(result.id, {
+            status: 'completed',
+            revisedImageBase64: revised,
+            designReview: review,
+          });
+          revisedCount++;
+        } else {
+          // Score is good, no revision needed
+          this.updateResult(result.id, {
+            status: 'completed',
+            designReview: review,
+          });
+          skippedCount++;
+        }
 
         this.updateStep('revise', {
           progress: Math.round(((i + 1) / completedResults.length) * 100),
         });
       } catch (err: any) {
-        this.log(`Revizyon hatası ("${result.topic}"): ${err.message}`);
-        // Don't fail the result, keep original
+        this.log(`Denetim hatası ("${result.topic}"): ${err.message}`);
         this.updateResult(result.id, { status: 'completed' });
       }
     }
 
     this.updateStep('revise', { status: 'completed', completedAt: Date.now(), progress: 100 });
-    this.log('Otomatik revizyon tamamlandı.');
+    this.log(`Tasarım denetimi tamamlandı: ${revisedCount} revize edildi, ${skippedCount} onaylandı.`);
   }
 
   // ===== STEP 5: Save results as templates =====
