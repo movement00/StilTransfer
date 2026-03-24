@@ -360,17 +360,48 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
     setIsRunning(false);
   };
 
-  const downloadAllResults = () => {
-    if (!currentRun) return;
-    currentRun.results.forEach((r, i) => {
-      const imgData = r.revisedImageBase64 || r.generatedImageBase64;
-      if (imgData) {
-        const link = document.createElement('a');
-        link.href = `data:image/png;base64,${imgData}`;
-        link.download = `pipeline-${i + 1}-${r.topic.slice(0, 30)}.png`;
-        link.click();
+  // Safe download: base64 → Blob → ObjectURL (prevents crash on large data URLs)
+  const downloadBase64Image = (base64: string, filename: string) => {
+    try {
+      const byteChars = atob(base64);
+      const byteNumbers = new Uint8Array(byteChars.length);
+      for (let i = 0; i < byteChars.length; i++) {
+        byteNumbers[i] = byteChars.charCodeAt(i);
       }
-    });
+      const blob = new Blob([byteNumbers], { type: 'image/png' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (err) {
+      console.error('Download failed:', err);
+    }
+  };
+
+  const [isDownloadingAll, setIsDownloadingAll] = useState(false);
+
+  const downloadAllResults = async () => {
+    if (!currentRun || isDownloadingAll) return;
+    setIsDownloadingAll(true);
+
+    const items = currentRun.results
+      .map((r, i) => ({ data: r.revisedImageBase64 || r.generatedImageBase64, topic: r.topic, index: i }))
+      .filter(item => item.data);
+
+    for (let i = 0; i < items.length; i++) {
+      const { data, topic, index } = items[i];
+      downloadBase64Image(data!, `pipeline-${index + 1}-${topic.slice(0, 30)}.png`);
+      // Stagger downloads so browser doesn't block them
+      if (i < items.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    }
+
+    setIsDownloadingAll(false);
   };
 
   // ═══ GROUP RESULTS BY BASE TOPIC ═══
@@ -577,8 +608,8 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
                 <RotateCcw size={16} /> Sıfırla
               </button>
               {currentRun.status === 'completed' && (
-                <button onClick={downloadAllResults} className="flex items-center gap-2 px-5 py-2.5 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-xl hover:bg-emerald-500/30 transition-all">
-                  <Download size={16} /> Tümünü İndir
+                <button onClick={downloadAllResults} disabled={isDownloadingAll} className="flex items-center gap-2 px-5 py-2.5 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-xl hover:bg-emerald-500/30 disabled:opacity-50 transition-all">
+                  {isDownloadingAll ? <><Loader2 size={16} className="animate-spin" /> İndiriliyor...</> : <><Download size={16} /> Tümünü İndir</>}
                 </button>
               )}
             </>
@@ -1070,13 +1101,12 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
                                 {/* Action overlay */}
                                 {displayImage && !isThisRevising && (
                                   <div className="absolute inset-0 bg-black/60 opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                                    <a
-                                      href={`data:image/png;base64,${displayImage}`}
-                                      download={`${result.topic.slice(0, 30)}${result.revisedImageBase64 ? '-revised' : ''}.png`}
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); downloadBase64Image(displayImage!, `${result.topic.slice(0, 30)}${result.revisedImageBase64 ? '-revised' : ''}.png`); }}
                                       className="bg-white/20 backdrop-blur-sm text-white px-3 py-1.5 rounded-lg text-xs flex items-center gap-1"
                                     >
                                       <Download size={12} /> İndir
-                                    </a>
+                                    </button>
                                     <button
                                       onClick={() => setExpandedRevision(isExpanded ? null : result.id)}
                                       className="bg-lumina-gold/30 backdrop-blur-sm text-lumina-gold px-3 py-1.5 rounded-lg text-xs flex items-center gap-1"

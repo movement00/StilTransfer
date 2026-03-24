@@ -246,7 +246,7 @@ function App() {
                   <div key={h.id} className="aspect-square rounded-lg overflow-hidden border border-lumina-800 group relative">
                     <img src={`data:image/png;base64,${h.url}`} className="w-full h-full object-cover" loading="lazy" />
                     <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                       <a href={`data:image/png;base64,${h.url}`} download="lumina-asset.png" className="text-white text-xs bg-lumina-accent px-2 py-1 rounded">İndir</a>
+                       <button onClick={() => { try { const b=atob(h.url); const a=new Uint8Array(b.length); for(let i=0;i<b.length;i++)a[i]=b.charCodeAt(i); const u=URL.createObjectURL(new Blob([a],{type:'image/png'})); const l=document.createElement('a'); l.href=u; l.download='lumina-asset.png'; document.body.appendChild(l); l.click(); document.body.removeChild(l); setTimeout(()=>URL.revokeObjectURL(u),1000); } catch(e){console.error(e);} }} className="text-white text-xs bg-lumina-accent px-2 py-1 rounded">İndir</button>
                     </div>
                   </div>
                 ))}
