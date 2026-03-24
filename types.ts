@@ -4,20 +4,62 @@ export interface BrandColor {
   hex: string;
 }
 
+// ══════════════════════════════════════════════════
+// Brand Asset Vault — real brand materials for creatives
+// ══════════════════════════════════════════════════
+
+export type BrandAssetCategory =
+  | 'qr_code'           // App download QR, website QR
+  | 'app_store_badge'   // Apple App Store badge
+  | 'play_store_badge'  // Google Play Store badge
+  | 'app_icon'          // App icon
+  | 'social_icon'       // Social media icons (custom)
+  | 'product_photo'     // Product shots
+  | 'badge'             // Trust badges, certifications
+  | 'custom_icon'       // Custom brand icons
+  | 'watermark'         // Brand watermark
+  | 'pattern'           // Brand pattern/texture
+  | 'other';            // Misc
+
+export interface BrandAsset {
+  id: string;
+  category: BrandAssetCategory;
+  name: string;           // "App Store Badge", "QR Kod — Uygulama İndirme"
+  description: string;    // When to use: "Uygulama tanıtımı yapılırken kullan"
+  imageBase64: string;    // The actual asset image
+  usageRule: string;      // AI hint: "Use when topic mentions app download or mobile"
+  createdAt: number;
+}
+
+export interface BrandPricing {
+  id: string;
+  name: string;           // "Başlangıç Paketi", "Pro Plan"
+  price: string;          // "₺99/ay", "$9.99/mo", "Free"
+  features: string[];     // ["5GB storage", "Unlimited users"]
+  highlighted: boolean;   // Is this the featured/recommended plan?
+}
+
 export interface Brand {
   id: string;
   name: string;
   industry: string;
-  description?: string; // New field for detailed brand description
-  logo: string | null; // Base64
-  primaryColor: string; // UI gösterimi için ana renk
-  secondaryColor: string; // UI gösterimi için ikincil renk
-  palette: BrandColor[]; // AI üretimi için detaylı renk paleti
+  description?: string;
+  logo: string | null;
+  primaryColor: string;
+  secondaryColor: string;
+  palette: BrandColor[];
   tone: string;
-  // New Contact Details
+  // Contact Details
   instagram?: string;
   phone?: string;
   address?: string;
+  website?: string;
+  // Asset Vault
+  assets?: BrandAsset[];
+  pricing?: BrandPricing[];
+  slogans?: string[];          // Brand slogans/taglines
+  appStoreUrl?: string;        // iOS App Store link
+  playStoreUrl?: string;       // Google Play Store link
 }
 
 export interface StyleAnalysis {
