@@ -55,7 +55,67 @@ export interface GeneratedAsset {
   createdAt: number;
 }
 
-export type ViewState = 'dashboard' | 'brands' | 'analyzer' | 'library' | 'bulk';
+export type ViewState = 'dashboard' | 'brands' | 'analyzer' | 'library' | 'bulk' | 'pipeline';
+
+// Pipeline Types
+export type PipelineStepStatus = 'idle' | 'running' | 'completed' | 'failed' | 'skipped';
+
+export interface PipelineStep {
+  id: string;
+  name: string;
+  description: string;
+  status: PipelineStepStatus;
+  progress: number; // 0-100
+  error?: string;
+  startedAt?: number;
+  completedAt?: number;
+  result?: any;
+}
+
+export interface PipelineConfig {
+  id: string;
+  name: string;
+  brandId: string;
+  aspectRatio: string;
+  topics: string[];
+  referenceImages: PipelineImage[];
+  productImages: PipelineImage[];
+  autoRevise: boolean;
+  revisionPrompt?: string;
+  saveAsTemplate: boolean;
+  templateFolderId?: string;
+  createdAt: number;
+}
+
+export interface PipelineImage {
+  id: string;
+  base64: string;
+  name: string;
+}
+
+export interface PipelineRun {
+  id: string;
+  configId: string;
+  status: 'idle' | 'running' | 'paused' | 'completed' | 'failed';
+  steps: PipelineStep[];
+  results: PipelineResult[];
+  startedAt?: number;
+  completedAt?: number;
+  totalItems: number;
+  completedItems: number;
+}
+
+export interface PipelineResult {
+  id: string;
+  topic: string;
+  styleAnalysis: StyleAnalysis;
+  referenceImageId: string;
+  generatedImageBase64?: string;
+  revisedImageBase64?: string;
+  status: 'pending' | 'analyzing' | 'generating' | 'revising' | 'completed' | 'failed';
+  error?: string;
+  savedAsTemplateId?: string;
+}
 
 export interface OptimizedPromptDetails {
   characterAnalysis: string;

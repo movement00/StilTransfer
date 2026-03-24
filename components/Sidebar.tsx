@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { LayoutDashboard, Briefcase, Wand2, Grid, Layers } from 'lucide-react';
+import { LayoutDashboard, Briefcase, Wand2, Grid, Layers, Zap } from 'lucide-react';
 import { ViewState } from '../types';
 
 interface SidebarProps {
@@ -13,6 +13,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView }) => {
     { id: 'dashboard', label: 'Panel', icon: LayoutDashboard },
     { id: 'brands', label: 'Marka Profilleri', icon: Briefcase },
     { id: 'analyzer', label: 'Stil Stüdyosu', icon: Wand2 },
+    { id: 'pipeline', label: 'Otomasyon Pipeline', icon: Zap },
     { id: 'bulk', label: 'Toplu Üretim', icon: Layers },
     { id: 'library', label: 'Stil Kütüphanesi', icon: Grid },
   ];

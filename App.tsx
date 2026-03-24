@@ -4,7 +4,8 @@ import Sidebar from './components/Sidebar';
 import BrandManager from './components/BrandManager';
 import StyleAnalyzer from './components/StyleAnalyzer';
 import StyleLibrary from './components/StyleLibrary';
-import BulkGenerator from './components/BulkGenerator'; // Import BulkGenerator
+import BulkGenerator from './components/BulkGenerator';
+import PipelineDashboard from './components/PipelineDashboard';
 import { ViewState, Brand, SavedTemplate, GeneratedAsset, TemplateFolder } from './types';
 
 // Initial Mock Data (Translated)
@@ -263,6 +264,16 @@ function App() {
             addToHistory={addToHistory}
             initialTemplate={templateToLoad}
             clearInitialTemplate={() => setTemplateToLoad(null)}
+          />
+        );
+      case 'pipeline':
+        return (
+          <PipelineDashboard
+            brands={brands}
+            templates={templates}
+            folders={folders}
+            setTemplates={setTemplates}
+            addToHistory={addToHistory}
           />
         );
       case 'bulk':
