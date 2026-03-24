@@ -1,10 +1,11 @@
 
 import {
-  Brand, StyleAnalysis, PipelineConfig, PipelineRun, PipelineStep,
+  Brand, StyleAnalysis, DesignBlueprint, PipelineConfig, PipelineRun, PipelineStep,
   PipelineResult, PipelineImage, SavedTemplate, GeneratedAsset
 } from '../types';
 import {
-  analyzeImageStyle, matchTopicsToStyles, generateBrandedImage,
+  analyzeImageStyle, decomposeToBlueprint, matchTopicsToStyles,
+  generateBrandedImage, reconstructFromBlueprint,
   generateDesignDirectives, DesignDirectives
 } from './geminiService';
 
@@ -80,11 +81,16 @@ export class PipelineService {
     const signal = this.abortController.signal;
 
     // Initialize run
+    const formats = config.aspectRatios && config.aspectRatios.length > 0
+      ? config.aspectRatios
+      : [config.aspectRatio];
+    const totalItems = config.topics.length * formats.length;
+
     const steps: PipelineStep[] = [
-      { id: 'analyze', name: 'Stil Analizi', description: 'Referans görseller analiz ediliyor', status: 'idle', progress: 0 },
+      { id: 'blueprint', name: 'Blueprint Ayrıştırma', description: 'Referans görseller JSON katmanlarına ayrıştırılıyor', status: 'idle', progress: 0 },
       { id: 'match', name: 'Akıllı Eşleştirme', description: 'Konular en uygun stillerle eşleştiriliyor', status: 'idle', progress: 0 },
       { id: 'directives', name: 'Tasarım Direktifleri', description: 'AI Kreatif Direktör tasarım kurallarını belirliyor', status: 'idle', progress: 0 },
-      { id: 'generate', name: 'Görsel Üretimi', description: 'Markalı görseller üretiliyor', status: 'idle', progress: 0 },
+      { id: 'generate', name: 'Görsel Üretimi', description: `${totalItems} görsel üretiliyor (${formats.length} format)`, status: 'idle', progress: 0 },
       { id: 'save', name: 'Kayıt & Arşiv', description: 'Sonuçlar kaydediliyor', status: 'idle', progress: 0 },
     ];
 
@@ -95,13 +101,18 @@ export class PipelineService {
       steps[4].status = 'skipped';
     }
 
-    const results: PipelineResult[] = config.topics.map((topic, i) => ({
-      id: `result-${i}`,
-      topic,
-      styleAnalysis: {} as StyleAnalysis,
-      referenceImageId: '',
-      status: 'pending' as const,
-    }));
+    const results: PipelineResult[] = [];
+    config.topics.forEach((topic, ti) => {
+      formats.forEach((fmt, fi) => {
+        results.push({
+          id: `result-${ti}-${fi}`,
+          topic: formats.length > 1 ? `${topic} [${fmt}]` : topic,
+          styleAnalysis: {} as StyleAnalysis,
+          referenceImageId: '',
+          status: 'pending' as const,
+        });
+      });
+    });
 
     this.currentRun = {
       id: `run-${Date.now()}`,
@@ -110,7 +121,7 @@ export class PipelineService {
       steps,
       results,
       startedAt: Date.now(),
-      totalItems: config.topics.length,
+      totalItems: totalItems,
       completedItems: 0,
     };
 
@@ -119,8 +130,8 @@ export class PipelineService {
     this.log(`${config.topics.length} konu, ${config.referenceImages.length} referans görsel`);
 
     try {
-      // ===== STEP 1: ANALYZE =====
-      const analyses = await this.stepAnalyze(config.referenceImages, signal);
+      // ===== STEP 1: BLUEPRINT DECOMPOSITION =====
+      const { analyses, blueprints } = await this.stepBlueprint(config.referenceImages, signal);
 
       // ===== STEP 2: MATCH =====
       const matches = await this.stepMatch(config.topics, analyses, signal);
@@ -131,8 +142,8 @@ export class PipelineService {
         directives = await this.stepDirectives(config, brand, analyses, matches, signal);
       }
 
-      // ===== STEP 4: GENERATE =====
-      await this.stepGenerate(config, brand, analyses, matches, signal, directives);
+      // ===== STEP 4: GENERATE (multi-format) =====
+      await this.stepGenerate(config, brand, analyses, blueprints, matches, formats, signal, directives);
 
       // ===== STEP 5: SAVE (optional) =====
       if (config.saveAsTemplate) {
@@ -155,37 +166,50 @@ export class PipelineService {
     return { ...this.currentRun };
   }
 
-  // ===== STEP 1: Analyze all reference images =====
-  private async stepAnalyze(
+  // ===== STEP 1: Blueprint decomposition =====
+  private async stepBlueprint(
     images: PipelineImage[],
     signal: AbortSignal
-  ): Promise<Map<string, StyleAnalysis>> {
-    this.updateStep('analyze', { status: 'running', startedAt: Date.now() });
-    this.log('Stil analizi başlıyor...');
+  ): Promise<{ analyses: Map<string, StyleAnalysis>; blueprints: Map<string, DesignBlueprint> }> {
+    this.updateStep('blueprint', { status: 'running', startedAt: Date.now() });
+    this.log('Blueprint ayrıştırma başlıyor — her görsel JSON katmanlarına çözümleniyor...');
 
     const analyses = new Map<string, StyleAnalysis>();
+    const blueprints = new Map<string, DesignBlueprint>();
 
     for (let i = 0; i < images.length; i++) {
       if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
 
       const img = images[i];
-      this.log(`Analiz ediliyor: ${img.name} (${i + 1}/${images.length})`);
+      this.log(`Ayrıştırılıyor: ${img.name} (${i + 1}/${images.length})`);
 
       try {
-        const analysis = await analyzeImageStyle(img.base64);
+        // Run both in parallel: quick style analysis + deep blueprint
+        const [analysis, blueprint] = await Promise.all([
+          analyzeImageStyle(img.base64),
+          decomposeToBlueprint(img.base64),
+        ]);
+
         analyses.set(img.id, analysis);
-        this.updateStep('analyze', {
+        blueprints.set(img.id, blueprint);
+
+        const layerCount = blueprint.layers.length;
+        const layerTypes = [...new Set(blueprint.layers.map(l => l.type))].join(', ');
+        this.log(`  → ${layerCount} katman tespit edildi: ${layerTypes}`);
+        this.log(`  → Layout: ${blueprint.layout.type}, Renk: ${blueprint.colorSystem.dominant} / ${blueprint.colorSystem.secondary}`);
+
+        this.updateStep('blueprint', {
           progress: Math.round(((i + 1) / images.length) * 100)
         });
       } catch (err: any) {
-        this.log(`Analiz hatası (${img.name}): ${err.message}`);
+        this.log(`Ayrıştırma hatası (${img.name}): ${err.message}`);
         throw err;
       }
     }
 
-    this.updateStep('analyze', { status: 'completed', completedAt: Date.now(), progress: 100 });
-    this.log(`${analyses.size} görsel başarıyla analiz edildi.`);
-    return analyses;
+    this.updateStep('blueprint', { status: 'completed', completedAt: Date.now(), progress: 100 });
+    this.log(`${analyses.size} görsel ayrıştırıldı — ${blueprints.size} blueprint oluşturuldu.`);
+    return { analyses, blueprints };
   }
 
   // ===== STEP 2: Match topics to styles =====
@@ -230,17 +254,22 @@ export class PipelineService {
     return matches;
   }
 
-  // ===== STEP 4: Generate branded images =====
+  // ===== STEP 4: Generate branded images (multi-format) =====
   private async stepGenerate(
     config: PipelineConfig,
     brand: Brand,
     analyses: Map<string, StyleAnalysis>,
+    blueprints: Map<string, DesignBlueprint>,
     matches: { topicIndex: number; styleId: string }[],
+    formats: string[],
     signal: AbortSignal,
     directives?: Map<number, string> | null
   ): Promise<void> {
     this.updateStep('generate', { status: 'running', startedAt: Date.now() });
-    this.log('Görsel üretimi başlıyor...');
+    const totalGenerations = matches.length * formats.length;
+    this.log(`Görsel üretimi başlıyor — ${matches.length} konu × ${formats.length} format = ${totalGenerations} görsel`);
+
+    let completed = 0;
 
     for (let i = 0; i < matches.length; i++) {
       if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
@@ -248,58 +277,82 @@ export class PipelineService {
       const match = matches[i];
       const topic = config.topics[match.topicIndex];
       const analysis = analyses.get(match.styleId);
+      const blueprint = blueprints.get(match.styleId);
       const refImage = config.referenceImages.find(img => img.id === match.styleId);
 
       if (!analysis || !refImage) {
-        this.updateResult(`result-${match.topicIndex}`, {
-          status: 'failed',
-          error: 'Stil veya referans bulunamadı'
+        formats.forEach((_, fi) => {
+          this.updateResult(`result-${match.topicIndex}-${fi}`, {
+            status: 'failed',
+            error: 'Stil veya referans bulunamadı'
+          });
         });
         continue;
       }
 
-      this.updateResult(`result-${match.topicIndex}`, { status: 'generating' });
-      this.log(`Üretiliyor (${i + 1}/${matches.length}): "${topic}"`);
+      const directive = directives?.get(match.topicIndex);
 
-      try {
-        // Cycle through product images
-        const productImg = config.productImages.length > 0
-          ? config.productImages[i % config.productImages.length]
-          : null;
+      for (let fi = 0; fi < formats.length; fi++) {
+        if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
 
-        // Get pre-generated design directive for this topic (if available)
-        const directive = directives?.get(match.topicIndex);
-        if (directive) {
-          this.log(`  → Tasarım direktifi uygulanıyor...`);
+        const fmt = formats[fi];
+        const resultId = `result-${match.topicIndex}-${fi}`;
+
+        this.updateResult(resultId, { status: 'generating' });
+        this.log(`Üretiliyor (${completed + 1}/${totalGenerations}): "${topic}" [${fmt}]`);
+
+        try {
+          const productImg = config.productImages.length > 0
+            ? config.productImages[i % config.productImages.length]
+            : null;
+
+          let imageBase64: string;
+
+          if (blueprint) {
+            // Use blueprint-based reconstruction (higher fidelity)
+            if (directive) this.log(`  → Blueprint + Direktif uygulanıyor...`);
+            imageBase64 = await reconstructFromBlueprint(
+              blueprint,
+              brand,
+              topic,
+              fmt,
+              refImage.base64,
+              productImg?.base64 || null,
+              directive
+            );
+          } else {
+            // Fallback to standard generation
+            imageBase64 = await generateBrandedImage(
+              brand,
+              analysis,
+              refImage.base64,
+              productImg?.base64 || null,
+              topic,
+              fmt,
+              directive
+            );
+          }
+
+          this.updateResult(resultId, {
+            status: 'completed',
+            generatedImageBase64: imageBase64,
+          });
+
+          completed++;
+          this.currentRun!.completedItems = completed;
+          this.updateStep('generate', {
+            progress: Math.round((completed / totalGenerations) * 100),
+          });
+          this.updateRun({ completedItems: completed });
+
+        } catch (err: any) {
+          this.updateResult(resultId, {
+            status: 'failed',
+            error: err.message,
+          });
+          this.log(`Üretim hatası ("${topic}" [${fmt}]): ${err.message}`);
+          completed++;
         }
-
-        const imageBase64 = await generateBrandedImage(
-          brand,
-          analysis,
-          refImage.base64,
-          productImg?.base64 || null,
-          topic,
-          config.aspectRatio,
-          directive
-        );
-
-        this.updateResult(`result-${match.topicIndex}`, {
-          status: 'completed',
-          generatedImageBase64: imageBase64,
-        });
-
-        this.currentRun!.completedItems++;
-        this.updateStep('generate', {
-          progress: Math.round(((i + 1) / matches.length) * 100),
-        });
-        this.updateRun({ completedItems: this.currentRun!.completedItems });
-
-      } catch (err: any) {
-        this.updateResult(`result-${match.topicIndex}`, {
-          status: 'failed',
-          error: err.message,
-        });
-        this.log(`Üretim hatası ("${topic}"): ${err.message}`);
       }
     }
 

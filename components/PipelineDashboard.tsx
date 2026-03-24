@@ -50,6 +50,7 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
   // Config state
   const [selectedBrandId, setSelectedBrandId] = useState(brands[0]?.id || '');
   const [aspectRatio, setAspectRatio] = useState('1:1');
+  const [selectedFormats, setSelectedFormats] = useState<Set<string>>(new Set(['1:1']));
   const [topicsText, setTopicsText] = useState('');
   const [referenceImages, setReferenceImages] = useState<PipelineImage[]>([]);
   const [productImages, setProductImages] = useState<PipelineImage[]>([]);
@@ -324,6 +325,7 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
       name: pipelineName || `Pipeline ${new Date().toLocaleString('tr-TR')}`,
       brandId: selectedBrandId,
       aspectRatio,
+      aspectRatios: [...selectedFormats],
       topics,
       referenceImages,
       productImages,
@@ -373,7 +375,7 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
             Otomasyon Pipeline
           </h2>
           <p className="text-slate-400 text-sm mt-1">
-            Tek tıkla: Analiz → Eşleştir → Üret → Revize → Kaydet
+            Blueprint → Eşleştir → Direktif → Üret → Kaydet
           </p>
         </div>
         <div className="flex gap-2">
@@ -441,23 +443,37 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
               </div>
             )}
 
-            {/* Aspect Ratio */}
-            <label className="block text-xs text-slate-400 mb-1">En-Boy Oranı</label>
+            {/* Aspect Ratio (multi-select) */}
+            <label className="block text-xs text-slate-400 mb-1">
+              Format Seçimi <span className="text-lumina-gold">({selectedFormats.size} format — her konu × {selectedFormats.size} görsel)</span>
+            </label>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 mb-3">
-              {ASPECT_RATIOS.map(ar => (
-                <button
-                  key={ar.value}
-                  onClick={() => setAspectRatio(ar.value)}
-                  className={`text-xs py-1.5 rounded-lg border transition-all ${
-                    aspectRatio === ar.value
-                      ? 'bg-lumina-gold/20 border-lumina-gold/50 text-lumina-gold'
-                      : 'bg-lumina-950 border-lumina-800 text-slate-400 hover:border-lumina-700'
-                  }`}
-                  disabled={isRunning}
-                >
-                  {ar.label}
-                </button>
-              ))}
+              {ASPECT_RATIOS.map(ar => {
+                const isSelected = selectedFormats.has(ar.value);
+                return (
+                  <button
+                    key={ar.value}
+                    onClick={() => {
+                      const next = new Set(selectedFormats);
+                      if (isSelected && next.size > 1) {
+                        next.delete(ar.value);
+                      } else {
+                        next.add(ar.value);
+                      }
+                      setSelectedFormats(next);
+                      setAspectRatio([...next][0]); // primary format for topic gen
+                    }}
+                    className={`text-xs py-1.5 rounded-lg border transition-all ${
+                      isSelected
+                        ? 'bg-lumina-gold/20 border-lumina-gold/50 text-lumina-gold'
+                        : 'bg-lumina-950 border-lumina-800 text-slate-400 hover:border-lumina-700'
+                    }`}
+                    disabled={isRunning}
+                  >
+                    {isSelected && <span className="mr-1">✓</span>}{ar.label}
+                  </button>
+                );
+              })}
             </div>
 
             {/* Topics */}

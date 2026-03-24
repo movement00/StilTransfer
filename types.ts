@@ -28,8 +28,92 @@ export interface StyleAnalysis {
   textureDetails: string;
   cameraAngle: string;
   artisticStyle: string;
-  // New field for subtle details
-  backgroundDetails: string; 
+  backgroundDetails: string;
+}
+
+// ══════════════════════════════════════════════════
+// Design Blueprint — pixel-level JSON decomposition
+// ══════════════════════════════════════════════════
+
+export interface BlueprintLayer {
+  id: string;
+  type: 'text' | 'image' | 'shape' | 'icon' | 'logo' | 'background' | 'overlay' | 'decoration';
+  content: string; // actual text or description of visual content
+  position: {
+    x: string;      // percentage from left (e.g. "5%", "center", "right")
+    y: string;      // percentage from top
+    anchor: string;  // "top-left" | "center" | "bottom-right" etc.
+  };
+  size: {
+    width: string;   // percentage of canvas (e.g. "90%", "auto")
+    height: string;
+  };
+  style: {
+    fontFamily?: string;       // for text layers
+    fontSize?: string;         // relative size "xl", "lg", "md", "sm", "xs"
+    fontWeight?: string;       // "bold", "semibold", "regular", "light"
+    textAlign?: string;        // "left", "center", "right"
+    lineHeight?: string;       // "tight", "normal", "relaxed"
+    letterSpacing?: string;    // "tight", "normal", "wide"
+    textTransform?: string;    // "uppercase", "lowercase", "none"
+    color: string;             // hex color
+    backgroundColor?: string;
+    borderRadius?: string;     // "none", "sm", "md", "lg", "full"
+    opacity?: string;          // "100%", "80%", "50%", etc.
+    shadow?: string;           // shadow description
+    gradient?: string;         // gradient description
+    blur?: string;             // blur amount
+  };
+  zIndex: number;              // layer stacking order
+  rotation?: string;           // rotation in degrees
+  effects?: string;            // additional effects description
+}
+
+export interface DesignBlueprint {
+  // Canvas properties
+  canvas: {
+    aspectRatio: string;       // detected aspect ratio
+    backgroundColor: string;   // hex
+    backgroundGradient?: string;
+    backgroundTexture?: string;
+    mood: string;
+    style: string;             // "minimalist", "bold", "elegant", etc.
+  };
+  // Layout grid
+  layout: {
+    type: string;              // "single-column", "two-column", "centered", "z-pattern", "f-pattern"
+    alignment: string;         // "left", "center", "right"
+    padding: string;           // percentage padding
+    gutterSize: string;        // space between elements
+    visualFlow: string;        // description of eye flow
+  };
+  // All layers in order
+  layers: BlueprintLayer[];
+  // Typography system
+  typography: {
+    headingStyle: string;      // font description for headings
+    bodyStyle: string;         // font description for body
+    accentStyle: string;       // font description for CTAs/badges
+    hierarchy: string;         // description of text hierarchy
+  };
+  // Color system
+  colorSystem: {
+    dominant: string;          // hex — 60%
+    secondary: string;         // hex — 30%
+    accent: string;            // hex — 10%
+    textPrimary: string;       // hex
+    textSecondary: string;     // hex
+    distribution: string;      // description of how colors are distributed
+  };
+  // Composition notes
+  compositionNotes: string;    // overall composition analysis
+  // Per-format alignment adjustments
+  formatAdjustments: {
+    square?: string;           // how to adjust for 1:1
+    portrait?: string;         // how to adjust for 4:5
+    story?: string;            // how to adjust for 9:16
+    landscape?: string;        // how to adjust for 16:9
+  };
 }
 
 export interface TemplateFolder {
@@ -105,6 +189,7 @@ export interface PipelineConfig {
   name: string;
   brandId: string;
   aspectRatio: string;
+  aspectRatios?: string[];     // multi-format: generate all selected formats
   topics: string[];
   referenceImages: PipelineImage[];
   productImages: PipelineImage[];

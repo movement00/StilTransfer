@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { Brand, StyleAnalysis } from "../types";
+import { Brand, StyleAnalysis, DesignBlueprint, BlueprintLayer } from "../types";
 
 // ═══ API Key Management ═══
 const API_KEY_STORAGE = 'lumina_gemini_api_key';
@@ -140,6 +140,322 @@ export const analyzeImageStyle = async (imageBase64: string): Promise<StyleAnaly
   const text = response.text;
   if (!text) throw new Error("Analiz yapılamadı.");
   return JSON.parse(text) as StyleAnalysis;
+};
+
+// ══════════════════════════════════════════════════════════════
+// 1.1 Blueprint Decomposition — Full JSON breakdown of reference
+// ══════════════════════════════════════════════════════════════
+export const decomposeToBlueprint = async (imageBase64: string): Promise<DesignBlueprint> => {
+  const ai = getAI();
+
+  const prompt = `
+    Sen dünyanın en deneyimli UI/UX tasarımcısı ve grafik tasarım mühendisisin.
+    Bu görseli bir tasarım programındaki (Figma/Photoshop) gibi KATMAN KATMAN, PİKSEL PİKSEL
+    JSON formatında ayrıştır.
+
+    GÖREV: Görseli tersine mühendislik ile tam bir "Design Blueprint" JSON'a dönüştür.
+    Bu blueprint ile başka bir AI, görselin BİREBİR AYNISINI farklı içerikle üretebilmeli.
+
+    HER KATMANI TESPİT ET:
+    1. ARKA PLAN: Düz renk mi, gradient mı, doku mu? Tam hex kodları ve yön.
+    2. METİNLER: Her metin bloğu ayrı katman. İçerik, font stili, boyut, ağırlık, renk, konum.
+    3. GÖRSELLER/FOTOĞRAFLAR: Ana görsel, ikon, illüstrasyon — her biri ayrı katman.
+    4. ŞEKİLLER: Dikdörtgen, daire, çizgi — her dekoratif öğe ayrı.
+    5. LOGO: Varsa konumu ve boyutu.
+    6. OVERLAY/EFEKTLER: Şeffaf katmanlar, blur, gölge.
+    7. DEKORASYON: Şeffaf ikonlar, watermark desenler, geometrik süsler.
+
+    POZİSYONLAR: Yüzde olarak ver (sol üst köşe = "0%", "0%").
+    "center" gibi anahtar kelimeler de kullanabilirsin.
+
+    BOYUTLAR: Canvas genişliğinin yüzdesi olarak ver.
+
+    KRİTİK:
+    - Boş alan bırakma — gördüğün HER öğeyi bir katman olarak listele
+    - Metinlerin TAM İÇERİĞİNİ yaz (kısaltma)
+    - Renkleri HEX kod olarak ver
+    - Katmanları z-index sırasıyla alt'tan üst'e sırala
+    - Her format için (kare, dikey, yatay, story) yerleşimin nasıl değişeceğini belirt
+  `;
+
+  const response = await ai.models.generateContent({
+    model: 'gemini-3-pro-preview',
+    contents: {
+      parts: [
+        { inlineData: { mimeType: 'image/jpeg', data: imageBase64 } },
+        { text: prompt }
+      ]
+    },
+    config: {
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          canvas: {
+            type: Type.OBJECT,
+            properties: {
+              aspectRatio: { type: Type.STRING },
+              backgroundColor: { type: Type.STRING },
+              backgroundGradient: { type: Type.STRING },
+              backgroundTexture: { type: Type.STRING },
+              mood: { type: Type.STRING },
+              style: { type: Type.STRING },
+            },
+            required: ['aspectRatio', 'backgroundColor', 'mood', 'style'],
+          },
+          layout: {
+            type: Type.OBJECT,
+            properties: {
+              type: { type: Type.STRING },
+              alignment: { type: Type.STRING },
+              padding: { type: Type.STRING },
+              gutterSize: { type: Type.STRING },
+              visualFlow: { type: Type.STRING },
+            },
+            required: ['type', 'alignment', 'padding', 'visualFlow'],
+          },
+          layers: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                id: { type: Type.STRING },
+                type: { type: Type.STRING },
+                content: { type: Type.STRING },
+                position: {
+                  type: Type.OBJECT,
+                  properties: {
+                    x: { type: Type.STRING },
+                    y: { type: Type.STRING },
+                    anchor: { type: Type.STRING },
+                  },
+                  required: ['x', 'y', 'anchor'],
+                },
+                size: {
+                  type: Type.OBJECT,
+                  properties: {
+                    width: { type: Type.STRING },
+                    height: { type: Type.STRING },
+                  },
+                  required: ['width', 'height'],
+                },
+                style: {
+                  type: Type.OBJECT,
+                  properties: {
+                    fontFamily: { type: Type.STRING },
+                    fontSize: { type: Type.STRING },
+                    fontWeight: { type: Type.STRING },
+                    textAlign: { type: Type.STRING },
+                    lineHeight: { type: Type.STRING },
+                    letterSpacing: { type: Type.STRING },
+                    textTransform: { type: Type.STRING },
+                    color: { type: Type.STRING },
+                    backgroundColor: { type: Type.STRING },
+                    borderRadius: { type: Type.STRING },
+                    opacity: { type: Type.STRING },
+                    shadow: { type: Type.STRING },
+                    gradient: { type: Type.STRING },
+                    blur: { type: Type.STRING },
+                  },
+                  required: ['color'],
+                },
+                zIndex: { type: Type.INTEGER },
+                rotation: { type: Type.STRING },
+                effects: { type: Type.STRING },
+              },
+              required: ['id', 'type', 'content', 'position', 'size', 'style', 'zIndex'],
+            },
+          },
+          typography: {
+            type: Type.OBJECT,
+            properties: {
+              headingStyle: { type: Type.STRING },
+              bodyStyle: { type: Type.STRING },
+              accentStyle: { type: Type.STRING },
+              hierarchy: { type: Type.STRING },
+            },
+            required: ['headingStyle', 'bodyStyle', 'hierarchy'],
+          },
+          colorSystem: {
+            type: Type.OBJECT,
+            properties: {
+              dominant: { type: Type.STRING },
+              secondary: { type: Type.STRING },
+              accent: { type: Type.STRING },
+              textPrimary: { type: Type.STRING },
+              textSecondary: { type: Type.STRING },
+              distribution: { type: Type.STRING },
+            },
+            required: ['dominant', 'secondary', 'accent', 'textPrimary', 'textSecondary'],
+          },
+          compositionNotes: { type: Type.STRING },
+          formatAdjustments: {
+            type: Type.OBJECT,
+            properties: {
+              square: { type: Type.STRING },
+              portrait: { type: Type.STRING },
+              story: { type: Type.STRING },
+              landscape: { type: Type.STRING },
+            },
+          },
+        },
+        required: ['canvas', 'layout', 'layers', 'typography', 'colorSystem', 'compositionNotes'],
+      },
+    },
+  });
+
+  const text = response.text;
+  if (!text) throw new Error("Blueprint oluşturulamadı.");
+  return JSON.parse(text) as DesignBlueprint;
+};
+
+// ══════════════════════════════════════════════════════════════
+// 1.2 Reconstruct from Blueprint — Generate image from JSON blueprint
+// ══════════════════════════════════════════════════════════════
+export const reconstructFromBlueprint = async (
+  blueprint: DesignBlueprint,
+  brand: Brand,
+  topic: string,
+  aspectRatio: string,
+  referenceImageBase64: string | null,
+  productImageBase64: string | null,
+  designDirective?: string
+): Promise<string> => {
+  if (window.aistudio && window.aistudio.hasSelectedApiKey) {
+    const hasKey = await window.aistudio.hasSelectedApiKey();
+    if (!hasKey) throw new Error("API_KEY_MISSING");
+  }
+
+  const ai = getAI();
+
+  // Map brand colors to blueprint color roles
+  const brandColors = brand.palette.length >= 3
+    ? { dominant: brand.palette[0].hex, secondary: brand.palette[1].hex, accent: brand.palette[2].hex }
+    : { dominant: brand.primaryColor, secondary: brand.secondaryColor, accent: brand.primaryColor };
+
+  // Remap layers: replace original content with brand content
+  const remappedLayers = blueprint.layers.map(layer => {
+    const l = { ...layer, style: { ...layer.style } };
+    // Remap colors to brand palette
+    if (l.type === 'background') {
+      l.style.color = brandColors.dominant;
+      if (l.style.gradient) {
+        l.style.gradient = l.style.gradient + ` (MARKA RENKLERİYLE DEĞİŞTİR: ${brandColors.dominant} → ${brandColors.secondary})`;
+      }
+    }
+    return l;
+  });
+
+  // Format-specific adjustments
+  const formatKey = aspectRatio === '1:1' ? 'square' : aspectRatio === '4:5' ? 'portrait' : aspectRatio === '9:16' ? 'story' : 'landscape';
+  const formatNote = blueprint.formatAdjustments?.[formatKey] || '';
+
+  const blueprintJSON = JSON.stringify({
+    canvas: {
+      ...blueprint.canvas,
+      backgroundColor: brandColors.dominant,
+    },
+    layout: blueprint.layout,
+    layers: remappedLayers,
+    typography: blueprint.typography,
+    colorSystem: {
+      dominant: brandColors.dominant,
+      secondary: brandColors.secondary,
+      accent: brandColors.accent,
+      textPrimary: brand.palette.find(c => c.name.toLowerCase().includes('beyaz') || c.name.toLowerCase().includes('white'))?.hex || '#FFFFFF',
+      textSecondary: brandColors.secondary,
+      distribution: blueprint.colorSystem.distribution,
+    },
+  }, null, 2);
+
+  const prompt = `
+    GÖREV: Aşağıdaki tasarım blueprint JSON'unu kullanarak, BİREBİR AYNI LAYOUT ve YAPIYLA
+    yeni bir görsel üret. Blueprint bir referans görselden çıkarıldı — aynı yapıyı koruyarak
+    marka içeriğiyle yeniden oluştur.
+
+    HEDEF MARKA:
+    İsim: ${brand.name}
+    Sektör: ${brand.industry}
+    ${brand.description ? `Açıklama: ${brand.description}` : ''}
+    Ton: ${brand.tone}
+
+    KONU: ${topic}
+    FORMAT: ${aspectRatio}
+
+    ═══ TASARIM BLUEPRINT (BU YAPIYA BİREBİR UYGUN ÜRET) ═══
+    ${blueprintJSON}
+    ═══════════════════════════════════════════════════════════
+
+    KRİTİK KURALLAR:
+    1. LAYOUT BİREBİR AYNI: Her katmanın konumu, boyutu ve hizalaması blueprint'teki gibi olsun.
+       - Metin sol'da ise sol'da kalsın, sağ'da ise sağ'da.
+       - Padding ve boşluklar aynı oranda olsun.
+
+    2. RENK DEĞİŞİMİ: Orijinal renkleri KULLANMA. Blueprint'teki renkleri marka renkleriyle değiştirdim:
+       - Dominant (%60): ${brandColors.dominant}
+       - İkincil (%30): ${brandColors.secondary}
+       - Vurgu (%10): ${brandColors.accent}
+
+    3. İÇERİK ADAPTASYONU: Metin katmanlarındaki orijinal içeriği "${topic}" konusuna uyarla.
+       Ama YAPI AYNI KALSIN — başlık başlık olarak, alt metin alt metin olarak kalsın.
+
+    4. TİPOGRAFİ: Blueprint'teki font stillerini koru (bold kalırsa bold, light kalırsa light).
+
+    5. SEKTÖR UYARLAMASI: Görseldeki nesneleri ${brand.industry} sektörüne uygun hale getir.
+
+    ${formatNote ? `6. FORMAT AYARI (${aspectRatio}): ${formatNote}` : ''}
+
+    ${brand.logo ? '7. LOGO: Verilen marka logosunu blueprint\'teki logo konumuna yerleştir.' : `7. Marka ismi "${brand.name}" blueprint'teki logo konumuna yazılsın.`}
+
+    ${designDirective ? `
+    *** EK TASARIM DİREKTİFLERİ ***
+    ${designDirective}
+    ` : ''}
+
+    KALİTE: 4K, profesyonel reklam ajansı kalitesinde.
+  `;
+
+  const parts: any[] = [];
+
+  if (referenceImageBase64) {
+    parts.push({ text: "ORIJINAL REFERANS GÖRSEL (yapıyı buradan kopyala):" });
+    parts.push({ inlineData: { mimeType: 'image/png', data: referenceImageBase64 } });
+  }
+
+  if (productImageBase64) {
+    parts.push({ text: "ÜRÜN GÖRSELİ (sahneye entegre et):" });
+    parts.push({ inlineData: { mimeType: 'image/png', data: productImageBase64 } });
+  }
+
+  if (brand.logo) {
+    parts.push({ text: "MARKA LOGOSU:" });
+    parts.push({ inlineData: { mimeType: 'image/png', data: brand.logo } });
+  }
+
+  parts.push({ text: prompt });
+
+  const response = await ai.models.generateContent({
+    model: 'gemini-3-pro-image-preview',
+    contents: { parts },
+    config: {
+      imageConfig: {
+        aspectRatio: aspectRatio,
+        imageSize: "2K"
+      }
+    }
+  });
+
+  const candidates = response.candidates;
+  if (!candidates || candidates.length === 0) throw new Error("Görsel oluşturulamadı.");
+
+  const contentParts = candidates[0].content.parts;
+  const imagePart = contentParts.find((p: any) => p.inlineData);
+
+  if (!imagePart || !imagePart.inlineData) {
+    throw new Error("Yanıtta görsel verisi bulunamadı.");
+  }
+
+  return imagePart.inlineData.data;
 };
 
 // 1.5 Smart Matching Logic
