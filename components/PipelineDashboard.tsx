@@ -54,7 +54,7 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
   const [topicsText, setTopicsText] = useState('');
   const [referenceImages, setReferenceImages] = useState<PipelineImage[]>([]);
   const [productImages, setProductImages] = useState<PipelineImage[]>([]);
-  const [autoRevise, setAutoRevise] = useState(false);
+  // autoRevise removed — Kreatif Beyin always active
   const [revisionPrompt, setRevisionPrompt] = useState('');
   const [saveAsTemplate, setSaveAsTemplate] = useState(true);
   const [pipelineName, setPipelineName] = useState('');
@@ -329,7 +329,7 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
       topics,
       referenceImages,
       productImages,
-      autoRevise,
+      autoRevise: true, // Kreatif Beyin always active
       revisionPrompt: undefined,
       saveAsTemplate,
       createdAt: Date.now(),
@@ -610,30 +610,18 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
               onChange={e => handleImageUpload(e.target.files, setProductImages)}
             />
 
-            {/* AI Design Directives Toggle */}
-            <div className="flex items-center justify-between mt-4 p-3 bg-lumina-950 rounded-lg border border-lumina-800">
-              <div>
-                <p className="text-sm text-white">AI Kreatif Direktör</p>
-                <p className="text-xs text-slate-500">Üretim öncesi profesyonel tasarım kuralları</p>
+            {/* AI Creative Brain Info */}
+            <div className="mt-4 p-3 bg-indigo-500/10 rounded-lg border border-indigo-500/20">
+              <div className="flex items-center gap-2 mb-1.5">
+                <span className="text-sm">🧠</span>
+                <p className="text-sm text-indigo-300 font-medium">Kreatif Beyin — Her Zaman Aktif</p>
               </div>
-              <button
-                onClick={() => setAutoRevise(!autoRevise)}
-                className={`w-11 h-6 rounded-full transition-all ${autoRevise ? 'bg-lumina-gold' : 'bg-lumina-800'}`}
-                disabled={isRunning}
-              >
-                <div className={`w-5 h-5 rounded-full bg-white shadow-sm transition-transform ${autoRevise ? 'translate-x-5.5 ml-[22px]' : 'translate-x-0.5 ml-[2px]'}`} />
-              </button>
+              <p className="text-xs text-indigo-300/70 leading-relaxed">
+                Her konu için otomatik olarak: Kreatif Direktör tasarım direktifleri (tipografi, renk 60-30-10,
+                kompozisyon, hiyerarşi) + AI Metin Yazarı içerik planı (her katman için akıllı metin,
+                başlık, alt başlık, CTA). Tüm bilgiler doğrudan üretime enjekte edilir.
+              </p>
             </div>
-
-            {autoRevise && (
-              <div className="mt-2 p-2.5 bg-indigo-500/10 border border-indigo-500/20 rounded-lg">
-                <p className="text-xs text-indigo-300">
-                  Üretimden ÖNCE her konu için AI Kreatif Direktör detaylı tasarım direktifi oluşturur:
-                  tipografi kuralları, renk stratejisi (60-30-10), kompozisyon rehberi, görsel hiyerarşi planı.
-                  Bu kurallar doğrudan üretim prompt'una enjekte edilir.
-                </p>
-              </div>
-            )}
 
             {/* Save as Template Toggle */}
             <div className="flex items-center justify-between mt-3 p-3 bg-lumina-950 rounded-lg border border-lumina-800">
