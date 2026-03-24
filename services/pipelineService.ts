@@ -5,7 +5,7 @@ import {
 } from '../types';
 import {
   analyzeImageStyle, decomposeToBlueprint, matchTopicsToStyles,
-  generateBrandedImage, reconstructFromBlueprint,
+  generateBrandedImage, reconstructFromBlueprint, adaptMasterToFormat,
   generateDesignDirectives, DesignDirectives
 } from './geminiService';
 
@@ -254,7 +254,7 @@ export class PipelineService {
     return matches;
   }
 
-  // ===== STEP 4: Generate branded images (multi-format) =====
+  // ===== STEP 4: Generate branded images (Master → Adapt flow) =====
   private async stepGenerate(
     config: PipelineConfig,
     brand: Brand,
@@ -267,7 +267,15 @@ export class PipelineService {
   ): Promise<void> {
     this.updateStep('generate', { status: 'running', startedAt: Date.now() });
     const totalGenerations = matches.length * formats.length;
+    // First format is the "master", rest are adaptations
+    const masterFormat = formats[0];
+    const adaptFormats = formats.slice(1);
+
     this.log(`Görsel üretimi başlıyor — ${matches.length} konu × ${formats.length} format = ${totalGenerations} görsel`);
+    if (adaptFormats.length > 0) {
+      this.log(`  → Master format: ${masterFormat}, Adaptasyon: ${adaptFormats.join(', ')}`);
+      this.log(`  → Her konu için önce master üretilecek, sonra birebir aynı tasarım diğer formatlara adapt edilecek.`);
+    }
 
     let completed = 0;
 
@@ -291,51 +299,99 @@ export class PipelineService {
       }
 
       const directive = directives?.get(match.topicIndex);
+      const productImg = config.productImages.length > 0
+        ? config.productImages[i % config.productImages.length]
+        : null;
 
-      for (let fi = 0; fi < formats.length; fi++) {
+      // ─── STEP A: Generate MASTER image (first format) ───
+      const masterResultId = `result-${match.topicIndex}-0`;
+      this.updateResult(masterResultId, { status: 'generating' });
+      this.log(`🎨 MASTER üretiliyor (${completed + 1}/${totalGenerations}): "${topic}" [${masterFormat}]`);
+
+      let masterImageBase64: string | null = null;
+
+      try {
+        if (blueprint) {
+          if (directive) this.log(`  → Blueprint + Direktif uygulanıyor...`);
+          masterImageBase64 = await reconstructFromBlueprint(
+            blueprint,
+            brand,
+            topic,
+            masterFormat,
+            refImage.base64,
+            productImg?.base64 || null,
+            directive
+          );
+        } else {
+          masterImageBase64 = await generateBrandedImage(
+            brand,
+            analysis,
+            refImage.base64,
+            productImg?.base64 || null,
+            topic,
+            masterFormat,
+            directive
+          );
+        }
+
+        this.updateResult(masterResultId, {
+          status: 'completed',
+          generatedImageBase64: masterImageBase64,
+        });
+
+        completed++;
+        this.currentRun!.completedItems = completed;
+        this.updateStep('generate', {
+          progress: Math.round((completed / totalGenerations) * 100),
+        });
+        this.updateRun({ completedItems: completed });
+        this.log(`  ✓ Master tamamlandı.`);
+
+      } catch (err: any) {
+        this.updateResult(masterResultId, {
+          status: 'failed',
+          error: err.message,
+        });
+        this.log(`  ✗ Master hatası ("${topic}"): ${err.message}`);
+        completed++;
+
+        // If master failed, skip adaptations for this topic
+        adaptFormats.forEach((_, afi) => {
+          this.updateResult(`result-${match.topicIndex}-${afi + 1}`, {
+            status: 'failed',
+            error: 'Master görsel üretilemediği için adaptasyon atlandı'
+          });
+          completed++;
+        });
+        this.currentRun!.completedItems = completed;
+        this.updateRun({ completedItems: completed });
+        continue;
+      }
+
+      // ─── STEP B: Adapt master to each additional format ───
+      for (let afi = 0; afi < adaptFormats.length; afi++) {
         if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
 
-        const fmt = formats[fi];
-        const resultId = `result-${match.topicIndex}-${fi}`;
+        const targetFmt = adaptFormats[afi];
+        const adaptResultId = `result-${match.topicIndex}-${afi + 1}`;
 
-        this.updateResult(resultId, { status: 'generating' });
-        this.log(`Üretiliyor (${completed + 1}/${totalGenerations}): "${topic}" [${fmt}]`);
+        this.updateResult(adaptResultId, { status: 'generating' });
+        this.log(`  📐 Adapt ediliyor (${completed + 1}/${totalGenerations}): "${topic}" [${masterFormat} → ${targetFmt}]`);
 
         try {
-          const productImg = config.productImages.length > 0
-            ? config.productImages[i % config.productImages.length]
-            : null;
+          const adaptedBase64 = await adaptMasterToFormat(
+            masterImageBase64!,
+            blueprint || { canvas: { aspectRatio: masterFormat, backgroundColor: brand.primaryColor, mood: analysis.mood, style: analysis.artisticStyle }, layout: { type: 'single-column', alignment: 'center', padding: '5%', gutterSize: '2%', visualFlow: '' }, layers: [], typography: { headingStyle: '', bodyStyle: '', accentStyle: '', hierarchy: '' }, colorSystem: { dominant: brand.primaryColor, secondary: brand.secondaryColor, accent: brand.primaryColor, textPrimary: '#FFFFFF', textSecondary: '#CCCCCC', distribution: '' }, compositionNotes: analysis.composition, formatAdjustments: {} },
+            brand,
+            topic,
+            targetFmt,
+            masterFormat,
+            productImg?.base64 || null
+          );
 
-          let imageBase64: string;
-
-          if (blueprint) {
-            // Use blueprint-based reconstruction (higher fidelity)
-            if (directive) this.log(`  → Blueprint + Direktif uygulanıyor...`);
-            imageBase64 = await reconstructFromBlueprint(
-              blueprint,
-              brand,
-              topic,
-              fmt,
-              refImage.base64,
-              productImg?.base64 || null,
-              directive
-            );
-          } else {
-            // Fallback to standard generation
-            imageBase64 = await generateBrandedImage(
-              brand,
-              analysis,
-              refImage.base64,
-              productImg?.base64 || null,
-              topic,
-              fmt,
-              directive
-            );
-          }
-
-          this.updateResult(resultId, {
+          this.updateResult(adaptResultId, {
             status: 'completed',
-            generatedImageBase64: imageBase64,
+            generatedImageBase64: adaptedBase64,
           });
 
           completed++;
@@ -344,13 +400,14 @@ export class PipelineService {
             progress: Math.round((completed / totalGenerations) * 100),
           });
           this.updateRun({ completedItems: completed });
+          this.log(`  ✓ Adaptasyon tamamlandı [${targetFmt}] — master ile birebir aynı tasarım.`);
 
         } catch (err: any) {
-          this.updateResult(resultId, {
+          this.updateResult(adaptResultId, {
             status: 'failed',
             error: err.message,
           });
-          this.log(`Üretim hatası ("${topic}" [${fmt}]): ${err.message}`);
+          this.log(`  ✗ Adaptasyon hatası ("${topic}" [${targetFmt}]): ${err.message}`);
           completed++;
         }
       }

@@ -458,6 +458,146 @@ export const reconstructFromBlueprint = async (
   return imagePart.inlineData.data;
 };
 
+// ══════════════════════════════════════════════════════════════
+// 1.3 Adapt Master to Different Format — Pixel-perfect reformat
+// ══════════════════════════════════════════════════════════════
+export const adaptMasterToFormat = async (
+  masterImageBase64: string,
+  blueprint: DesignBlueprint,
+  brand: Brand,
+  topic: string,
+  targetAspectRatio: string,
+  masterAspectRatio: string,
+  productImageBase64: string | null
+): Promise<string> => {
+  if (window.aistudio && window.aistudio.hasSelectedApiKey) {
+    const hasKey = await window.aistudio.hasSelectedApiKey();
+    if (!hasKey) throw new Error("API_KEY_MISSING");
+  }
+
+  const ai = getAI();
+
+  const brandColors = brand.palette.length >= 3
+    ? { dominant: brand.palette[0].hex, secondary: brand.palette[1].hex, accent: brand.palette[2].hex }
+    : { dominant: brand.primaryColor, secondary: brand.secondaryColor, accent: brand.primaryColor };
+
+  const formatKey = targetAspectRatio === '1:1' ? 'square' : targetAspectRatio === '4:5' ? 'portrait' : targetAspectRatio === '9:16' ? 'story' : 'landscape';
+  const formatNote = blueprint.formatAdjustments?.[formatKey] || '';
+
+  // Build a concise layer inventory from the master so AI knows exactly what exists
+  const layerInventory = blueprint.layers.map(l => {
+    if (l.type === 'text') return `• [${l.type}] "${l.content}" — font: ${l.style.fontSize || 'md'} ${l.style.fontWeight || 'regular'}, color: ${l.style.color}, align: ${l.style.textAlign || 'left'}`;
+    if (l.type === 'background') return `• [${l.type}] color: ${l.style.color}${l.style.gradient ? `, gradient: ${l.style.gradient}` : ''}`;
+    return `• [${l.type}] "${l.content}" — pos: ${l.position.x},${l.position.y}, size: ${l.size.width}×${l.size.height}`;
+  }).join('\n');
+
+  const prompt = `
+    GÖREV: Verilen MASTER görseli ${masterAspectRatio} formatından ${targetAspectRatio} formatına ADAPT ET.
+
+    ██████████████████████████████████████████████████████████████
+    ██  BU BİR YENİDEN BOYUTLANDIRMA — YENİ TASARIM DEĞİL!    ██
+    ██████████████████████████████████████████████████████████████
+
+    MASTER görseli dikkatlice incele. Şimdi TAMAMEN AYNI görseli ${targetAspectRatio} formatında üret.
+
+    DEĞİŞMEYECEK ŞEYLERİN LİSTESİ (HİÇBİRİ DEĞİŞMEMELİ):
+    ┌─────────────────────────────────────────────┐
+    │ ✗ Font ailesi DEĞİŞMEZ                     │
+    │ ✗ Font boyut oranları DEĞİŞMEZ             │
+    │ ✗ Font ağırlığı (bold/regular) DEĞİŞMEZ    │
+    │ ✗ Yazı renkleri DEĞİŞMEZ                   │
+    │ ✗ Arka plan rengi/gradyanı DEĞİŞMEZ        │
+    │ ✗ Metin içeriği (kelimeler) DEĞİŞMEZ       │
+    │ ✗ Logo/ikon DEĞİŞMEZ                       │
+    │ ✗ Görsel elementler DEĞİŞMEZ               │
+    │ ✗ Dekoratif öğeler DEĞİŞMEZ                │
+    │ ✗ Renk paleti DEĞİŞMEZ                     │
+    │ ✗ Genel stil/mood DEĞİŞMEZ                 │
+    └─────────────────────────────────────────────┘
+
+    SADECE DEĞİŞECEK ŞEYLER:
+    ┌─────────────────────────────────────────────┐
+    │ ✓ Kanvas boyut oranı: ${masterAspectRatio} → ${targetAspectRatio}     │
+    │ ✓ Elementlerin konumu (yeni boyuta sığması) │
+    │ ✓ Boşluk/padding oranları (boyuta uyum)     │
+    └─────────────────────────────────────────────┘
+
+    MASTER GÖRSELDEKİ KATMANLAR:
+    ${layerInventory}
+
+    MARKA RENKLERİ (bunları koru):
+    Dominant: ${brandColors.dominant}
+    İkincil: ${brandColors.secondary}
+    Vurgu: ${brandColors.accent}
+
+    ${formatNote ? `FORMAT NOTU: ${formatNote}` : ''}
+
+    HİZALAMA KURALLARI (${targetAspectRatio}):
+    ${targetAspectRatio === '9:16' ? `
+    - Dikey format — daha fazla dikey alan var
+    - Elementleri dikey olarak dağıt, yatay sıkıştırma
+    - Metin blokları arasında daha fazla dikey boşluk bırak
+    - Ana görseli merkeze veya üst yarıya al` : ''}
+    ${targetAspectRatio === '1:1' ? `
+    - Kare format — dengeli dağılım
+    - Merkez ağırlıklı yerleşim
+    - Tüm elementler simetrik olmalı` : ''}
+    ${targetAspectRatio === '4:5' ? `
+    - Hafif dikey — Instagram post boyutu
+    - Elementleri hafifçe dikey olarak yeniden düzenle
+    - 1:1'e çok yakın, minimal değişiklik gerekli` : ''}
+    ${targetAspectRatio === '16:9' ? `
+    - Yatay format — daha fazla yatay alan
+    - Elementleri yatay olarak dağıt
+    - Metin ve görsel yan yana gelebilir` : ''}
+
+    KONU: ${topic}
+
+    KALİTE: 4K, profesyonel.
+    TEKRAR: BU YENİ BİR TASARIM DEĞİL. MASTER İLE BİREBİR AYNI, SADECE BOYUT DEĞİŞİYOR.
+  `;
+
+  const parts: any[] = [];
+
+  parts.push({ text: "MASTER GÖRSEL — bunu bire bir kopyala, sadece boyutu değiştir:" });
+  parts.push({ inlineData: { mimeType: 'image/png', data: masterImageBase64 } });
+
+  if (productImageBase64) {
+    parts.push({ text: "ÜRÜN GÖRSELİ (master'daki ile aynı şekilde yerleştir):" });
+    parts.push({ inlineData: { mimeType: 'image/png', data: productImageBase64 } });
+  }
+
+  if (brand.logo) {
+    parts.push({ text: "MARKA LOGOSU (master'daki ile aynı):" });
+    parts.push({ inlineData: { mimeType: 'image/png', data: brand.logo } });
+  }
+
+  parts.push({ text: prompt });
+
+  const response = await ai.models.generateContent({
+    model: 'gemini-3-pro-image-preview',
+    contents: { parts },
+    config: {
+      imageConfig: {
+        aspectRatio: targetAspectRatio,
+        imageSize: "2K"
+      }
+    }
+  });
+
+  const candidates = response.candidates;
+  if (!candidates || candidates.length === 0) throw new Error("Format adaptasyonu başarısız.");
+
+  const contentParts = candidates[0].content.parts;
+  const imagePart = contentParts.find((p: any) => p.inlineData);
+
+  if (!imagePart || !imagePart.inlineData) {
+    throw new Error("Yanıtta görsel verisi bulunamadı.");
+  }
+
+  return imagePart.inlineData.data;
+};
+
 // 1.5 Smart Matching Logic
 export const matchTopicsToStyles = async (
   topics: string[], 
