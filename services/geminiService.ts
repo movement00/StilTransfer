@@ -1141,7 +1141,8 @@ export const generateBrandedImage = async (
 export const reviseGeneratedImage = async (
   originalImageBase64: string,
   revisionPrompt: string,
-  revisionImageBase64: string | null
+  revisionImageBase64: string | null,
+  aspectRatio?: string
 ): Promise<string> => {
   if (window.aistudio && window.aistudio.hasSelectedApiKey) {
       const hasKey = await window.aistudio.hasSelectedApiKey();
@@ -1152,15 +1153,19 @@ export const reviseGeneratedImage = async (
 
   const ai = getAI();
 
+  const aspectRatioInstruction = aspectRatio
+    ? `\n    4. ÇIKTI BOYUT ORANI MUTLAKA ${aspectRatio} OLMALIDIR. Referans görselin boyut oranı farklı olabilir — onu sadece stil/içerik referansı olarak kullan, boyut oranını KESİNLİKLE değiştirme. Orijinal görselin ${aspectRatio} oranını koru.`
+    : '';
+
   const prompt = `
     GÖREV: Bu görseli aşağıdaki talimatlara göre REVIZE ET (DÜZENLE).
-    
+
     REVİZE TALİMATI: ${revisionPrompt}
-    
+
     KURALLAR:
     1. Görselin orijinal stilini, kompozisyonunu ve kalitesini KORU. Sadece talimat verilen kısımları değiştir.
-    2. Eğer ek bir referans görsel verildiyse, o görseldeki ilgili nesneyi veya stili bu görsele entegre et.
-    3. Sonuç yine yüksek kaliteli ve fotogerçekçi olmalıdır.
+    2. Eğer ek bir referans görsel verildiyse, o görseldeki ilgili nesneyi veya stili bu görsele entegre et — ama referans görselin BOYUT ORANINI ALMA.
+    3. Sonuç yine yüksek kaliteli ve fotogerçekçi olmalıdır.${aspectRatioInstruction}
   `;
 
   const parts: any[] = [];
@@ -1192,8 +1197,8 @@ export const reviseGeneratedImage = async (
     contents: { parts },
     config: {
       imageConfig: {
-        imageSize: "2K"
-        // Preserve aspect ratio is usually implicit in image-to-image but we let model decide based on input
+        imageSize: "2K",
+        ...(aspectRatio ? { aspectRatio } : {})
       }
     }
   });

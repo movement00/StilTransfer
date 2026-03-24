@@ -377,6 +377,10 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
 
   // ═══ GROUP RESULTS BY BASE TOPIC ═══
   const getBaseTopic = (topic: string) => topic.replace(/\s*\[.*?\]\s*$/, '');
+  const getAspectRatio = (topic: string) => {
+    const match = topic.match(/\[([\d]+:[\d]+)\]/);
+    return match ? match[1] : undefined;
+  };
 
   const resultGroups: Record<string, PipelineResult[]> = currentRun ? (() => {
     const groups: Record<string, PipelineResult[]> = {};
@@ -429,7 +433,7 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
 
       let revisedPrimary: string | null = null;
       try {
-        revisedPrimary = await reviseGeneratedImage(primarySource, bulkRevisionPrompt, null);
+        revisedPrimary = await reviseGeneratedImage(primarySource, bulkRevisionPrompt, null, getAspectRatio(primary.topic));
         setCurrentRun(prev => {
           if (!prev) return prev;
           return {
@@ -456,7 +460,8 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
           const revisedSibling = await reviseGeneratedImage(
             siblingSource,
             `${bulkRevisionPrompt}. Bu görseli referans görseldeki değişikliklere uyumlu şekilde revize et. Aynı dil, aynı metin, aynı stil olmalı.`,
-            revisedPrimary // Pass revised primary as reference!
+            revisedPrimary, // Pass revised primary as reference!
+            getAspectRatio(sibling.topic)
           );
           setCurrentRun(prev => {
             if (!prev) return prev;
@@ -500,7 +505,7 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
 
     let revisedPrimary: string | null = null;
     try {
-      revisedPrimary = await reviseGeneratedImage(sourceImage, prompt, null);
+      revisedPrimary = await reviseGeneratedImage(sourceImage, prompt, null, getAspectRatio(result.topic));
       setCurrentRun(prev => {
         if (!prev) return prev;
         return {
@@ -529,7 +534,8 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
         const revisedSib = await reviseGeneratedImage(
           sibSource,
           `${prompt}. Bu görseli referans görseldeki değişikliklere uyumlu şekilde revize et. Aynı dil, aynı metin, aynı stil olmalı.`,
-          revisedPrimary
+          revisedPrimary,
+          getAspectRatio(sibling.topic)
         );
         setCurrentRun(prev => {
           if (!prev) return prev;
