@@ -150,13 +150,12 @@ export async function scoutAndAdapt(
   // Step 2: Generate adapted image
   onProgress?.('Marka uyarlaması yapılıyor...', 60);
   const adaptedImage = await generateBrandedImage(
-    analysis,
     brand,
-    topic,
-    aspectRatio,
-    imageBase64,
-    undefined, // productImage
-    undefined  // logoBase64
+    analysis,
+    imageBase64,    // referenceImage
+    null,           // productImage
+    topic,          // contextDescription
+    aspectRatio
   );
 
   onProgress?.('Tamamlandı!', 100);
