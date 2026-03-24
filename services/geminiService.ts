@@ -1142,7 +1142,8 @@ export const reviseGeneratedImage = async (
   originalImageBase64: string,
   revisionPrompt: string,
   revisionImageBase64: string | null,
-  aspectRatio?: string
+  aspectRatio?: string,
+  logoBase64?: string
 ): Promise<string> => {
   if (window.aistudio && window.aistudio.hasSelectedApiKey) {
       const hasKey = await window.aistudio.hasSelectedApiKey();
@@ -1157,6 +1158,10 @@ export const reviseGeneratedImage = async (
     ? `\n    4. ÇIKTI BOYUT ORANI MUTLAKA ${aspectRatio} OLMALIDIR. Referans görselin boyut oranı farklı olabilir — onu sadece stil/içerik referansı olarak kullan, boyut oranını KESİNLİKLE değiştirme. Orijinal görselin ${aspectRatio} oranını koru.`
     : '';
 
+  const logoInstruction = logoBase64
+    ? `\n    5. LOGO: Görseldeki marka logosunu KESİNLİKLE orijinal haliyle koru. Logoyu yeniden çizme, yeniden yazma veya kendi hayal ettiğin bir logo koyma — verilen ORİJİNAL MARKA LOGOSU görselini aynen kullan. Tasarım diline göre sadece renk uyarlaması yapılabilir.`
+    : '';
+
   const prompt = `
     GÖREV: Bu görseli aşağıdaki talimatlara göre REVIZE ET (DÜZENLE).
 
@@ -1164,8 +1169,8 @@ export const reviseGeneratedImage = async (
 
     KURALLAR:
     1. Görselin orijinal stilini, kompozisyonunu ve kalitesini KORU. Sadece talimat verilen kısımları değiştir.
-    2. Eğer ek bir referans görsel verildiyse, o görseldeki ilgili nesneyi veya stili bu görsele entegre et — ama referans görselin BOYUT ORANINI ALMA.
-    3. Sonuç yine yüksek kaliteli ve fotogerçekçi olmalıdır.${aspectRatioInstruction}
+    2. Eğer ek bir referans görsel verildiyse, o görseldeki ilgili değişiklikleri/stili bu görsele uygula — ama referans görselin BOYUT ORANINI ALMA, orijinal görselin boyut oranını koru.
+    3. Sonuç yine yüksek kaliteli ve fotogerçekçi olmalıdır.${aspectRatioInstruction}${logoInstruction}
   `;
 
   const parts: any[] = [];
@@ -1179,13 +1184,24 @@ export const reviseGeneratedImage = async (
     }
   });
 
-  // Optional Revision Reference Image (e.g., "Add this icon")
+  // Optional Revision Reference Image
   if (revisionImageBase64) {
-    parts.push({ text: "EKLENECEK/REFERANS ALINACAK NESNE:" });
+    parts.push({ text: "STİL/İÇERİK REFERANSI (sadece değişiklikleri uygula, boyut oranını KOPYALAMA):" });
     parts.push({
       inlineData: {
         mimeType: 'image/png',
         data: revisionImageBase64
+      }
+    });
+  }
+
+  // Brand logo — must be preserved as-is
+  if (logoBase64) {
+    parts.push({ text: "ORİJİNAL MARKA LOGOSU — bunu aynen koru, kendi logonu çizme:" });
+    parts.push({
+      inlineData: {
+        mimeType: 'image/png',
+        data: logoBase64
       }
     });
   }
@@ -1211,6 +1227,98 @@ export const reviseGeneratedImage = async (
 
   if (!imagePart || !imagePart.inlineData) {
      throw new Error("Yanıtta görsel verisi bulunamadı.");
+  }
+
+  return imagePart.inlineData.data;
+};
+
+// ══════════════════════════════════════════════════
+// 4b. Adapt revised image to different aspect ratio (for group revision consistency)
+// ══════════════════════════════════════════════════
+export const adaptRevisedToFormat = async (
+  revisedMasterBase64: string,
+  targetAspectRatio: string,
+  masterAspectRatio: string,
+  logoBase64?: string
+): Promise<string> => {
+  if (window.aistudio && window.aistudio.hasSelectedApiKey) {
+    const hasKey = await window.aistudio.hasSelectedApiKey();
+    if (!hasKey) throw new Error("API_KEY_MISSING");
+  }
+
+  const ai = getAI();
+
+  const prompt = `
+    GÖREV: Verilen görseli ${masterAspectRatio} formatından ${targetAspectRatio} formatına ADAPT ET.
+
+    ██████████████████████████████████████████████████████████████
+    ██  BU BİR YENİDEN BOYUTLANDIRMA — YENİ TASARIM DEĞİL!    ██
+    ██████████████████████████████████████████████████████████████
+
+    Kaynak görseli dikkatlice incele. TAMAMEN AYNI görseli ${targetAspectRatio} formatında üret.
+
+    DEĞİŞMEYECEK ŞEYLERİN LİSTESİ (HİÇBİRİ DEĞİŞMEMELİ):
+    ┌─────────────────────────────────────────────┐
+    │ ✗ Font ailesi DEĞİŞMEZ                     │
+    │ ✗ Font boyut oranları DEĞİŞMEZ             │
+    │ ✗ Font ağırlığı (bold/regular) DEĞİŞMEZ    │
+    │ ✗ Yazı renkleri DEĞİŞMEZ                   │
+    │ ✗ Arka plan rengi/gradyanı DEĞİŞMEZ        │
+    │ ✗ Metin içeriği (kelimeler) DEĞİŞMEZ       │
+    │ ✗ Logo — ORİJİNAL LOGOYU KULLAN             │
+    │ ✗ Görsel elementler DEĞİŞMEZ               │
+    │ ✗ Dekoratif öğeler DEĞİŞMEZ                │
+    │ ✗ Renk paleti DEĞİŞMEZ                     │
+    │ ✗ Genel stil/mood DEĞİŞMEZ                 │
+    └─────────────────────────────────────────────┘
+
+    SADECE DEĞİŞECEK ŞEYLER:
+    ┌─────────────────────────────────────────────┐
+    │ ✓ Kanvas boyut oranı: ${masterAspectRatio} → ${targetAspectRatio}     │
+    │ ✓ Elementlerin konumu (yeni boyuta sığması) │
+    │ ✓ Boşluk/padding oranları (boyuta uyum)     │
+    └─────────────────────────────────────────────┘
+
+    ${targetAspectRatio === '9:16' ? 'HİZALAMA: Dikey format — elementleri dikey dağıt, yatay sıkıştırma, metin blokları arası dikey boşluk.' : ''}
+    ${targetAspectRatio === '1:1' ? 'HİZALAMA: Kare format — merkez ağırlıklı simetrik yerleşim.' : ''}
+    ${targetAspectRatio === '4:5' ? 'HİZALAMA: Hafif dikey — Instagram post, minimal değişiklik.' : ''}
+    ${targetAspectRatio === '16:9' ? 'HİZALAMA: Yatay format — elementleri yatay dağıt.' : ''}
+
+    KALİTE: 4K, profesyonel.
+    TEKRAR: BU YENİ BİR TASARIM DEĞİL. KAYNAK İLE BİREBİR AYNI, SADECE BOYUT DEĞİŞİYOR.
+  `;
+
+  const parts: any[] = [];
+
+  parts.push({ text: "KAYNAK GÖRSEL — bunu birebir kopyala, sadece boyutu değiştir:" });
+  parts.push({ inlineData: { mimeType: 'image/png', data: revisedMasterBase64 } });
+
+  if (logoBase64) {
+    parts.push({ text: "ORİJİNAL MARKA LOGOSU — bunu aynen koru, yeniden çizme:" });
+    parts.push({ inlineData: { mimeType: 'image/png', data: logoBase64 } });
+  }
+
+  parts.push({ text: prompt });
+
+  const response = await ai.models.generateContent({
+    model: 'gemini-3-pro-image-preview',
+    contents: { parts },
+    config: {
+      imageConfig: {
+        aspectRatio: targetAspectRatio,
+        imageSize: "2K"
+      }
+    }
+  });
+
+  const candidates = response.candidates;
+  if (!candidates || candidates.length === 0) throw new Error("Format adaptasyonu başarısız.");
+
+  const contentParts = candidates[0].content.parts;
+  const imagePart = contentParts.find(p => p.inlineData);
+
+  if (!imagePart || !imagePart.inlineData) {
+    throw new Error("Yanıtta görsel verisi bulunamadı.");
   }
 
   return imagePart.inlineData.data;

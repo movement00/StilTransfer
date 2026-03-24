@@ -10,7 +10,7 @@ import {
   PipelineImage, PipelineStepStatus, SavedTemplate, GeneratedAsset, TemplateFolder, ScoutResult
 } from '../types';
 import { pipelineService } from '../services/pipelineService';
-import { resizeImageToRawBase64, generatePipelineTopics, reviseGeneratedImage } from '../services/geminiService';
+import { resizeImageToRawBase64, generatePipelineTopics, reviseGeneratedImage, adaptRevisedToFormat } from '../services/geminiService';
 import { downloadBase64Image, downloadMultipleImages } from '../services/downloadService';
 import { searchInspiration, downloadImage, scoreAndRankResults } from '../services/scoutService';
 
@@ -411,9 +411,10 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
   };
 
   // ═══ REVISION HANDLERS ═══
-  // Chained revision: revise first image → use revised as reference for siblings
+  // Chained revision: revise first image → adapt revised to other formats (like initial generation)
   const handleGroupRevision = async () => {
     if (!currentRun || !bulkRevisionPrompt.trim() || selectedGroups.size === 0) return;
+    const brand = brands.find(b => b.id === selectedBrandId);
 
     setIsRevising(true);
     const allIds: string[] = [];
@@ -426,14 +427,15 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
       const group = resultGroups[baseTopic as string];
       if (!group || group.length === 0) continue;
 
-      // Step 1: Revise the FIRST image in the group
+      // Step 1: Revise the FIRST image (master) in the group
       const primary = group[0];
       const primarySource = primary.revisedImageBase64 || primary.generatedImageBase64;
       if (!primarySource) continue;
+      const primaryAspectRatio = getAspectRatio(primary.topic);
 
       let revisedPrimary: string | null = null;
       try {
-        revisedPrimary = await reviseGeneratedImage(primarySource, bulkRevisionPrompt, null, getAspectRatio(primary.topic));
+        revisedPrimary = await reviseGeneratedImage(primarySource, bulkRevisionPrompt, null, primaryAspectRatio, brand?.logo);
         setCurrentRun(prev => {
           if (!prev) return prev;
           return {
@@ -449,31 +451,31 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
 
       setRevisingIds(prev => { const n = new Set(prev); n.delete(primary.id); return n; });
 
-      // Step 2: Revise siblings using the revised primary as REFERENCE
-      // This keeps language, style, and content consistent across sizes
+      // Step 2: ADAPT revised primary to sibling formats (same approach as initial generation)
+      // This ensures pixel-perfect consistency: same design, different aspect ratio
+      if (!revisedPrimary) continue;
       for (let i = 1; i < group.length; i++) {
         const sibling = group[i];
-        const siblingSource = sibling.revisedImageBase64 || sibling.generatedImageBase64;
-        if (!siblingSource) continue;
+        const siblingAspectRatio = getAspectRatio(sibling.topic);
 
         try {
-          const revisedSibling = await reviseGeneratedImage(
-            siblingSource,
-            `${bulkRevisionPrompt}. Bu görseli referans görseldeki değişikliklere uyumlu şekilde revize et. Aynı dil, aynı metin, aynı stil olmalı.`,
-            revisedPrimary, // Pass revised primary as reference!
-            getAspectRatio(sibling.topic)
+          const adaptedSibling = await adaptRevisedToFormat(
+            revisedPrimary,
+            siblingAspectRatio || '9:16',
+            primaryAspectRatio || '1:1',
+            brand?.logo
           );
           setCurrentRun(prev => {
             if (!prev) return prev;
             return {
               ...prev,
               results: prev.results.map(r =>
-                r.id === sibling.id ? { ...r, revisedImageBase64: revisedSibling } : r
+                r.id === sibling.id ? { ...r, revisedImageBase64: adaptedSibling } : r
               ),
             };
           });
         } catch (err: any) {
-          console.error(`Revision failed for sibling ${sibling.id}:`, err);
+          console.error(`Adapt failed for sibling ${sibling.id}:`, err);
         }
 
         setRevisingIds(prev => { const n = new Set(prev); n.delete(sibling.id); return n; });
@@ -488,12 +490,14 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
   const handleSingleRevision = async (resultId: string) => {
     const prompt = singleRevisionPrompts[resultId];
     if (!currentRun || !prompt?.trim()) return;
+    const brand = brands.find(b => b.id === selectedBrandId);
 
     // Find this result and its group siblings
     const result = currentRun.results.find(r => r.id === resultId);
     if (!result) return;
     const baseTopic = getBaseTopic(result.topic);
     const group = resultGroups[baseTopic] || [result];
+    const resultAspectRatio = getAspectRatio(result.topic);
 
     // Mark all group members as revising
     const groupIds = group.map(r => r.id);
@@ -505,7 +509,7 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
 
     let revisedPrimary: string | null = null;
     try {
-      revisedPrimary = await reviseGeneratedImage(sourceImage, prompt, null, getAspectRatio(result.topic));
+      revisedPrimary = await reviseGeneratedImage(sourceImage, prompt, null, resultAspectRatio, brand?.logo);
       setCurrentRun(prev => {
         if (!prev) return prev;
         return {
@@ -524,30 +528,29 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
 
     setRevisingIds(prev => { const n = new Set(prev); n.delete(resultId); return n; });
 
-    // Step 2: Revise siblings with revised image as reference
+    // Step 2: Adapt revised image to sibling formats (same design, different size)
     const siblings = group.filter(r => r.id !== resultId);
     for (const sibling of siblings) {
-      const sibSource = sibling.revisedImageBase64 || sibling.generatedImageBase64;
-      if (!sibSource) continue;
+      const siblingAspectRatio = getAspectRatio(sibling.topic);
 
       try {
-        const revisedSib = await reviseGeneratedImage(
-          sibSource,
-          `${prompt}. Bu görseli referans görseldeki değişikliklere uyumlu şekilde revize et. Aynı dil, aynı metin, aynı stil olmalı.`,
+        const adaptedSib = await adaptRevisedToFormat(
           revisedPrimary,
-          getAspectRatio(sibling.topic)
+          siblingAspectRatio || '9:16',
+          resultAspectRatio || '1:1',
+          brand?.logo
         );
         setCurrentRun(prev => {
           if (!prev) return prev;
           return {
             ...prev,
             results: prev.results.map(r =>
-              r.id === sibling.id ? { ...r, revisedImageBase64: revisedSib } : r
+              r.id === sibling.id ? { ...r, revisedImageBase64: adaptedSib } : r
             ),
           };
         });
       } catch (err: any) {
-        console.error(`Sibling revision failed:`, err);
+        console.error(`Sibling adapt failed:`, err);
       }
 
       setRevisingIds(prev => { const n = new Set(prev); n.delete(sibling.id); return n; });
