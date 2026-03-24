@@ -1,27 +1,20 @@
 /**
- * Safe image download utility — iOS Safari compatible.
+ * Safe image download — iOS Safari compatible, non-blocking.
  *
- * Problems solved:
- * 1. data:image URLs → crash (page navigates to megabyte string)
- * 2. Blob URL + <a>.click() → WebKitBlobResource error on iOS Safari
- *    (Safari tries to navigate to blob URL, page unloads, JS dies)
- * 3. Bulk downloads → browser blocks simultaneous downloads
+ * iOS Safari problems:
+ * 1. <a href="data:image/png;base64,..."> → navigates to URL, page dies
+ * 2. <a href="blob:..."> + click() → WebKitBlobResource error, page dies
+ * 3. navigator.share() blocks main thread if awaited → pipeline stalls
  *
- * Strategy:
- * - iOS/iPadOS: Use navigator.share() → native share sheet → "Save Image"
- * - Android: Use navigator.share() if available, else blob download
- * - Desktop: Blob URL download (works fine on Chrome/Firefox/Edge)
+ * Solution for iOS: Fire-and-forget navigator.share() (don't await).
+ * The share sheet opens as an overlay — JS continues running underneath.
+ * If share unavailable: open blob in new tab via iframe trick.
  */
 
 const isIOS = (): boolean => {
   if (typeof navigator === 'undefined') return false;
   return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
     (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-};
-
-const isMobile = (): boolean => {
-  if (typeof navigator === 'undefined') return false;
-  return isIOS() || /Android/i.test(navigator.userAgent);
 };
 
 const base64ToBlob = (base64: string, type = 'image/png'): Blob => {
@@ -33,29 +26,52 @@ const base64ToBlob = (base64: string, type = 'image/png'): Blob => {
   return new Blob([byteNumbers], { type });
 };
 
-const shareFile = async (blob: Blob, filename: string): Promise<boolean> => {
+/**
+ * iOS download: non-blocking share sheet.
+ * Returns true if share was initiated (not awaited — fire and forget).
+ */
+const iosDownload = (blob: Blob, filename: string): boolean => {
   try {
     const file = new File([blob], filename, { type: blob.type });
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      await navigator.share({ files: [file] });
+      // Fire and forget — do NOT await. Share sheet opens as overlay,
+      // JS keeps running. User saves from share sheet.
+      navigator.share({ files: [file] }).catch(() => {
+        // User cancelled or share failed — silently ignore
+      });
       return true;
     }
-  } catch (err: any) {
-    // User cancelled share → not an error, just return false
-    if (err.name === 'AbortError') return true;
-    console.warn('Share failed, falling back:', err);
+  } catch {
+    // canShare not supported
   }
-  return false;
+
+  // Fallback: open image in new tab via anchor with target=_blank
+  // User can long-press → "Save Image" from there
+  try {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    // Don't set download attr on iOS — it triggers the blob navigation bug
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    return true;
+  } catch {
+    return false;
+  }
 };
 
-const desktopDownload = (blob: Blob, filename: string): void => {
+/**
+ * Desktop/Android download via blob URL.
+ */
+const standardDownload = (blob: Blob, filename: string): void => {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
   link.download = filename;
-  // Use target=_blank as extra safety against page navigation
-  link.target = '_blank';
-  link.rel = 'noopener';
   link.style.display = 'none';
   document.body.appendChild(link);
   link.click();
@@ -63,29 +79,33 @@ const desktopDownload = (blob: Blob, filename: string): void => {
   setTimeout(() => URL.revokeObjectURL(url), 3000);
 };
 
-export const downloadBase64Image = async (base64: string, filename: string): Promise<void> => {
+/**
+ * Download a base64 image safely on any platform.
+ * Non-blocking on iOS — won't interrupt running pipelines.
+ */
+export const downloadBase64Image = (base64: string, filename: string): void => {
   try {
     const blob = base64ToBlob(base64);
 
-    // iOS: Always use share API (blob download crashes Safari)
     if (isIOS()) {
-      const shared = await shareFile(blob, filename);
-      if (shared) return;
-      // Fallback: open blob in new tab, user can long-press to save
-      const url = URL.createObjectURL(blob);
-      window.open(url, '_blank');
-      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      iosDownload(blob, filename);
       return;
     }
 
-    // Android: Try share first, fall back to blob download
-    if (isMobile()) {
-      const shared = await shareFile(blob, filename);
-      if (shared) return;
+    // Android with share support
+    if (/Android/i.test(navigator.userAgent)) {
+      try {
+        const file = new File([blob], filename, { type: blob.type });
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          navigator.share({ files: [file] }).catch(() => {});
+          return;
+        }
+      } catch {
+        // fall through to standard download
+      }
     }
 
-    // Desktop / fallback
-    desktopDownload(blob, filename);
+    standardDownload(blob, filename);
   } catch (err) {
     console.error('Download failed:', err);
   }
@@ -93,17 +113,16 @@ export const downloadBase64Image = async (base64: string, filename: string): Pro
 
 /**
  * Download multiple images with staggered timing.
- * Each download is independent — one failure doesn't stop the rest.
  */
 export const downloadMultipleImages = async (
   items: Array<{ base64: string; filename: string }>,
   onProgress?: (current: number, total: number) => void
 ): Promise<void> => {
   for (let i = 0; i < items.length; i++) {
-    await downloadBase64Image(items[i].base64, items[i].filename);
+    downloadBase64Image(items[i].base64, items[i].filename);
     onProgress?.(i + 1, items.length);
     if (i < items.length - 1) {
-      await new Promise(resolve => setTimeout(resolve, 300));
+      await new Promise(resolve => setTimeout(resolve, 500));
     }
   }
 };
