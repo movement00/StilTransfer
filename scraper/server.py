@@ -39,20 +39,64 @@ class SearchRequest(BaseModel):
     query: str
     sources: list[str] = ["duckduckgo", "pinterest", "google"]
     industry: str = ""
+    page: int = 0  # pagination: 0 = first page, 1 = second, etc.
 
 class ProxyRequest(BaseModel):
     url: str
 
 
+# ── Helpers ─────────────────────────────────────────
+
+def is_single_design(width: int, height: int) -> bool:
+    """Filter out grid/collage images - only keep single design images."""
+    if width <= 0 or height <= 0:
+        return True  # Unknown dimensions, keep it
+    ratio = width / height
+    # Reject extremely wide (panorama/grid) or extremely tall (vertical grid) images
+    # Typical single designs: 0.4 (9:16 story) to 2.0 (16:9 banner)
+    if ratio < 0.35 or ratio > 2.2:
+        return False
+    # Reject very large images that are likely multi-image grids
+    # A grid of 4 images might be 2000x2000, but a single image could be too
+    # Better heuristic: if both dimensions are very large AND ratio is near 1:1, could be grid
+    # But we can't be sure, so keep it
+    return True
+
+
+def filter_quality(results: list[dict]) -> list[dict]:
+    """Filter results for quality single-design images."""
+    filtered = []
+    for r in results:
+        w = r.get("width", 0)
+        h = r.get("height", 0)
+        url = r.get("imageUrl", "")
+
+        # Skip tiny images
+        if w > 0 and h > 0 and (w < 300 or h < 300):
+            continue
+
+        # Skip grid/collage images
+        if not is_single_design(w, h):
+            continue
+
+        # Skip known bad domains
+        if any(d in url for d in ["gstatic.com", "google.com/images", "favicon", "logo", "icon", "badge"]):
+            continue
+
+        filtered.append(r)
+    return filtered
+
+
 # ── Scrapers ────────────────────────────────────────
 
-def search_duckduckgo(query: str) -> list[dict]:
+def search_duckduckgo(query: str, page: int = 0) -> list[dict]:
     """DuckDuckGo image search using duckduckgo_search library."""
     results = []
     try:
         from duckduckgo_search import DDGS
+        max_results = 50  # Fetch more
         with DDGS() as ddgs:
-            for r in ddgs.images(query, max_results=25):
+            for r in ddgs.images(query, max_results=max_results):
                 results.append({
                     "title": r.get("title", ""),
                     "imageUrl": r.get("image", ""),
@@ -67,29 +111,47 @@ def search_duckduckgo(query: str) -> list[dict]:
     return results
 
 
-def search_pinterest(query: str) -> list[dict]:
+def search_pinterest(query: str, page: int = 0) -> list[dict]:
     """Pinterest scraping via their resource endpoint."""
     results = []
     try:
         # Use Pinterest's internal search API
         url = "https://www.pinterest.com/resource/BaseSearchResource/get/"
-        params = {
-            "source_url": f"/search/pins/?q={quote(query)}",
-            "data": json.dumps({
-                "options": {
-                    "query": query,
-                    "scope": "pins",
-                    "page_size": 25,
-                },
-                "context": {},
-            }),
-        }
-        with httpx.Client(headers={**HEADERS, "X-Requested-With": "XMLHttpRequest"}, follow_redirects=True, timeout=15) as client:
-            resp = client.get(url, params=params)
 
-        if resp.status_code == 200:
+        # Bookmark for pagination
+        bookmark = None
+        pages_to_fetch = page + 1  # Fetch up to requested page
+
+        for p in range(pages_to_fetch):
+            options = {
+                "query": query,
+                "scope": "pins",
+                "page_size": 50,
+            }
+            if bookmark:
+                options["bookmarks"] = [bookmark]
+
+            params = {
+                "source_url": f"/search/pins/?q={quote(query)}",
+                "data": json.dumps({
+                    "options": options,
+                    "context": {},
+                }),
+            }
+            with httpx.Client(headers={**HEADERS, "X-Requested-With": "XMLHttpRequest"}, follow_redirects=True, timeout=15) as client:
+                resp = client.get(url, params=params)
+
+            if resp.status_code != 200:
+                break
+
             data = resp.json()
-            pins = data.get("resource_response", {}).get("data", {}).get("results", [])
+            resource = data.get("resource_response", {})
+            pins = resource.get("data", {}).get("results", [])
+            bookmark = resource.get("bookmark")
+
+            if p < pages_to_fetch - 1:
+                continue  # Skip earlier pages, we only want the requested page
+
             for pin in pins:
                 images = pin.get("images", {})
                 orig = images.get("orig", {})
@@ -105,6 +167,9 @@ def search_pinterest(query: str) -> list[dict]:
                         "height": orig.get("height", 0),
                     })
 
+            if not bookmark:
+                break
+
         # Fallback: HTML scraping
         if not results:
             with httpx.Client(headers=HEADERS, follow_redirects=True, timeout=15) as client:
@@ -113,7 +178,7 @@ def search_pinterest(query: str) -> list[dict]:
             seen = set()
             for match in re.finditer(r'https://i\.pinimg\.com/(?:originals|736x)/[a-f0-9/]+\.\w+', html):
                 img_url = match.group(0)
-                if img_url in seen or len(results) >= 15:
+                if img_url in seen or len(results) >= 30:
                     continue
                 seen.add(img_url)
                 orig_url = img_url.replace("/736x/", "/originals/")
@@ -132,11 +197,12 @@ def search_pinterest(query: str) -> list[dict]:
     return results
 
 
-def search_google_images(query: str) -> list[dict]:
-    """Google Images scraping."""
+def search_google_images(query: str, page: int = 0) -> list[dict]:
+    """Google Images scraping with pagination."""
     results = []
     try:
-        url = f"https://www.google.com/search?q={quote(query)}&tbm=isch&ijn=0"
+        # Google uses ijn parameter for pagination (0, 1, 2, ...)
+        url = f"https://www.google.com/search?q={quote(query)}&tbm=isch&ijn={page}"
         with httpx.Client(headers=HEADERS, follow_redirects=True, timeout=15) as client:
             resp = client.get(url)
         html = resp.text
@@ -147,13 +213,11 @@ def search_google_images(query: str) -> list[dict]:
             r'\["(https?://[^"]+\.(?:jpg|jpeg|png|webp))",\s*(\d+),\s*(\d+)\]'
         )
         for match in pattern.finditer(html):
-            if len(results) >= 20:
+            if len(results) >= 40:
                 break
             img_url = match.group(1)
             height = int(match.group(2))
             width = int(match.group(3))
-            if width < 200 or height < 200:
-                continue
             if img_url in seen or "gstatic.com" in img_url or "google.com" in img_url:
                 continue
             seen.add(img_url)
@@ -203,11 +267,11 @@ def api_search(req: SearchRequest):
     for source in req.sources:
         try:
             if source == "duckduckgo":
-                r = search_duckduckgo(f"{query} social media post design")
+                r = search_duckduckgo(f"{query} social media post design", req.page)
             elif source == "pinterest":
-                r = search_pinterest(query)
+                r = search_pinterest(query, req.page)
             elif source == "google":
-                r = search_google_images(f"{query} social media design inspiration")
+                r = search_google_images(f"{query} social media design inspiration", req.page)
             else:
                 continue
             sources_report[source] = len(r)
@@ -224,10 +288,16 @@ def api_search(req: SearchRequest):
             seen.add(item["imageUrl"])
             unique.append(item)
 
+    # Filter quality: remove grid/collage images, tiny images
+    filtered = filter_quality(unique)
+
     return {
-        "results": unique,
-        "total": len(unique),
+        "results": filtered,
+        "total": len(filtered),
+        "total_raw": len(unique),
         "sources_report": sources_report,
+        "page": req.page,
+        "has_more": len(filtered) > 0,
     }
 
 

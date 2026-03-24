@@ -44,6 +44,21 @@ const ContentScout: React.FC<ContentScoutProps> = ({ brands, addToHistory }) => 
   const [isScoring, setIsScoring] = useState(false);
   const [scoringProgress, setScoringProgress] = useState<{ done: number; total: number } | null>(null);
   const [scoredResults, setScoredResults] = useState<Map<string, { score: number; reason: string }>>(new Map());
+  const [currentPage, setCurrentPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [lastSearchQuery, setLastSearchQuery] = useState('');
+  const scrollContainerRef = useCallback((node: HTMLDivElement | null) => {
+    if (!node) return;
+    const handleScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = node;
+      if (scrollHeight - scrollTop - clientHeight < 300 && !isLoadingMore && hasMore && searchResults.length > 0) {
+        loadMoreResults();
+      }
+    };
+    node.addEventListener('scroll', handleScroll);
+    return () => node.removeEventListener('scroll', handleScroll);
+  }, [isLoadingMore, hasMore, searchResults.length]);
 
   // Check backend health on mount
   const refreshHealth = useCallback(() => {
@@ -85,19 +100,55 @@ const ContentScout: React.FC<ContentScoutProps> = ({ brands, addToHistory }) => 
     setIsSearching(true);
     setSearchResults([]);
     setSelectedResults(new Set());
+    setCurrentPage(0);
+    setHasMore(true);
+    setLastSearchQuery(q);
 
     try {
-      const { results, sourcesReport: sr } = await searchInspiration(
+      const { results, sourcesReport: sr, hasMore: more } = await searchInspiration(
         q,
         ['duckduckgo', 'pinterest', 'google'],
-        selectedBrand?.industry
+        selectedBrand?.industry,
+        0
       );
       setSearchResults(results);
       setSourcesReport(sr);
+      setHasMore(more && results.length > 0);
     } catch (err) {
       console.error('Search error:', err);
     } finally {
       setIsSearching(false);
+    }
+  };
+
+  // Load more results (pagination)
+  const loadMoreResults = async () => {
+    if (isLoadingMore || !hasMore || !lastSearchQuery) return;
+    setIsLoadingMore(true);
+    const nextPage = currentPage + 1;
+
+    try {
+      const { results, hasMore: more } = await searchInspiration(
+        lastSearchQuery,
+        ['duckduckgo', 'pinterest', 'google'],
+        selectedBrand?.industry,
+        nextPage
+      );
+
+      if (results.length > 0) {
+        // Deduplicate against existing results
+        const existingUrls = new Set(searchResults.map(r => r.imageUrl));
+        const newResults = results.filter(r => !existingUrls.has(r.imageUrl));
+        setSearchResults(prev => [...prev, ...newResults]);
+        setCurrentPage(nextPage);
+        setHasMore(more && newResults.length > 0);
+      } else {
+        setHasMore(false);
+      }
+    } catch (err) {
+      console.error('Load more error:', err);
+    } finally {
+      setIsLoadingMore(false);
     }
   };
 
@@ -564,6 +615,23 @@ const ContentScout: React.FC<ContentScoutProps> = ({ brands, addToHistory }) => 
                   );
                 })}
               </div>
+
+              {/* Load More */}
+              {hasMore && searchResults.length > 0 && (
+                <div className="flex justify-center mt-6">
+                  <button
+                    onClick={loadMoreResults}
+                    disabled={isLoadingMore}
+                    className="flex items-center gap-2 px-6 py-2.5 bg-lumina-900 border border-lumina-800 text-white rounded-xl hover:bg-lumina-800 transition-all text-sm disabled:opacity-50"
+                  >
+                    {isLoadingMore ? (
+                      <><Loader2 size={16} className="animate-spin" /> Yükleniyor...</>
+                    ) : (
+                      <>Daha Fazla Görsel Yükle</>
+                    )}
+                  </button>
+                </div>
+              )}
             </>
           )}
 
