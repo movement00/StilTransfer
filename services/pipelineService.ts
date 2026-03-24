@@ -6,8 +6,8 @@ import {
 import {
   analyzeImageStyle, decomposeToBlueprint, matchTopicsToStyles,
   generateBrandedImage, reconstructFromBlueprint, adaptMasterToFormat,
-  generateDesignDirectives, generateContentPlan,
-  DesignDirectives, ContentPlan
+  generateDesignDirectives, generateContentPlan, decideAssetUsage,
+  DesignDirectives, ContentPlan, AssetPlanResult
 } from './geminiService';
 
 type PipelineEventType = 'step-update' | 'result-update' | 'run-update' | 'log';
@@ -259,7 +259,7 @@ export class PipelineService {
     matches: { topicIndex: number; styleId: string }[],
     formats: string[],
     signal: AbortSignal,
-    brainResults?: Map<number, { directives: DesignDirectives; contentPlan: ContentPlan }> | null
+    brainResults?: Map<number, { directives: DesignDirectives; contentPlan: ContentPlan; assetPlan: AssetPlanResult | null }> | null
   ): Promise<void> {
     this.updateStep('generate', { status: 'running', startedAt: Date.now() });
     const totalGenerations = matches.length * formats.length;
@@ -319,6 +319,7 @@ export class PipelineService {
             productImg?.base64 || null,
             brain?.contentPlan || null,
             brain?.directives || null,
+            brain?.assetPlan || null,
           );
         } else {
           masterImageBase64 = await generateBrandedImage(
@@ -423,11 +424,13 @@ export class PipelineService {
     blueprints: Map<string, DesignBlueprint>,
     matches: { topicIndex: number; styleId: string }[],
     signal: AbortSignal
-  ): Promise<Map<number, { directives: DesignDirectives; contentPlan: ContentPlan }>> {
+  ): Promise<Map<number, { directives: DesignDirectives; contentPlan: ContentPlan; assetPlan: AssetPlanResult | null }>> {
     this.updateStep('brain', { status: 'running', startedAt: Date.now() });
-    this.log('🧠 Kreatif Beyin çalışıyor — her konu için direktif + içerik planı üretiliyor...');
 
-    const brainMap = new Map<number, { directives: DesignDirectives; contentPlan: ContentPlan }>();
+    const hasAssets = (brand.assets && brand.assets.length > 0) || (brand.pricing && brand.pricing.length > 0) || (brand.slogans && brand.slogans.length > 0);
+    this.log(`🧠 Kreatif Beyin çalışıyor — direktif + içerik planı${hasAssets ? ' + asset kararları' : ''}...`);
+
+    const brainMap = new Map<number, { directives: DesignDirectives; contentPlan: ContentPlan; assetPlan: AssetPlanResult | null }>();
 
     for (let i = 0; i < matches.length; i++) {
       if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
@@ -442,11 +445,14 @@ export class PipelineService {
       this.log(`Beyin çalışıyor (${i + 1}/${matches.length}): "${topic}"`);
 
       try {
-        // Run directives and content plan in parallel
-        const [directives, contentPlan] = await Promise.all([
+        // Run directives, content plan, and asset decisions in parallel
+        const [directives, contentPlan, assetPlan] = await Promise.all([
           generateDesignDirectives(brand, topic, analysis, config.aspectRatio),
           blueprint
             ? generateContentPlan(blueprint, brand, topic, { typographyRules: '', colorStrategy: '', compositionGuide: '', hierarchyPlan: '', fullDirective: '' })
+            : Promise.resolve(null),
+          hasAssets
+            ? decideAssetUsage(brand, topic, blueprint || null)
             : Promise.resolve(null),
         ]);
 
@@ -469,6 +475,7 @@ export class PipelineService {
             ctaText: 'Keşfet',
             brandMessage: brand.description || brand.name,
           },
+          assetPlan,
         });
 
         const textLayerCount = finalContentPlan?.layerContents.length || 0;
@@ -477,6 +484,22 @@ export class PipelineService {
         if (finalContentPlan) {
           this.log(`  → Başlık: "${finalContentPlan.headline}"`);
           this.log(`  → CTA: "${finalContentPlan.ctaText}"`);
+        }
+        if (assetPlan) {
+          const usedAssets = assetPlan.decisions.filter(d => d.shouldUse);
+          if (usedAssets.length > 0) {
+            this.log(`  → Asset Agent: ${usedAssets.length} varlık kullanılacak (${usedAssets.map(d => {
+              const a = brand.assets?.find(x => x.id === d.assetId);
+              return a?.name || d.assetId;
+            }).join(', ')})`);
+          } else {
+            this.log(`  → Asset Agent: Bu konu için ekstra varlık gerekmez`);
+          }
+          if (assetPlan.sloganToUse) this.log(`  → Slogan: "${assetPlan.sloganToUse}"`);
+          if (assetPlan.pricingToShow) {
+            const plan = brand.pricing?.find(p => p.id === assetPlan.pricingToShow);
+            if (plan) this.log(`  → Fiyat: ${plan.name} — ${plan.price}`);
+          }
         }
 
         this.updateStep('brain', {

@@ -1,8 +1,14 @@
 
 import React, { useState } from 'react';
-import { Brand, BrandColor } from '../types';
-import { Plus, Trash2, Upload, Instagram, Phone, MapPin, Palette, X, Edit2, Check } from 'lucide-react';
+import { Brand, BrandColor, BrandAsset, BrandAssetCategory, BrandPricing } from '../types';
+import { Plus, Trash2, Upload, Instagram, Phone, MapPin, Palette, X, Edit2, Check, QrCode, Smartphone, Tag, Globe, Star, Image, Package } from 'lucide-react';
 import { resizeImageToRawBase64 } from '../services/geminiService';
+
+const ASSET_CATEGORIES_MAP: Record<string, string> = {
+  qr_code: 'QR', app_store_badge: 'iOS', play_store_badge: 'Android', app_icon: 'App',
+  social_icon: 'Social', product_photo: 'Ürün', badge: 'Rozet', custom_icon: 'İkon',
+  watermark: 'WM', pattern: 'Desen', other: 'Diğer',
+};
 
 interface BrandManagerProps {
   brands: Brand[];
@@ -32,15 +38,37 @@ const BrandManager: React.FC<BrandManagerProps> = ({ brands, setBrands }) => {
   const [tempColorName, setTempColorName] = useState('');
   const [tempColorHex, setTempColorHex] = useState('#000000');
 
+  // Asset Vault state
+  const [tempAssetName, setTempAssetName] = useState('');
+  const [tempAssetCategory, setTempAssetCategory] = useState<BrandAssetCategory>('qr_code');
+  const [tempAssetDescription, setTempAssetDescription] = useState('');
+  const [tempAssetUsageRule, setTempAssetUsageRule] = useState('');
+  const [tempAssetImage, setTempAssetImage] = useState<string | null>(null);
+
+  // Pricing state
+  const [tempPricingName, setTempPricingName] = useState('');
+  const [tempPricingPrice, setTempPricingPrice] = useState('');
+  const [tempPricingFeatures, setTempPricingFeatures] = useState('');
+  const [tempPricingHighlighted, setTempPricingHighlighted] = useState(false);
+
+  // Slogan state
+  const [tempSlogan, setTempSlogan] = useState('');
+
   const resetForm = () => {
     setNewBrand({
       id: '', name: '', industry: '', description: '', logo: null,
       primaryColor: '#F8BE00', secondaryColor: '#201C1D', palette: [],
       tone: 'Profesyonel',
-      instagram: '', phone: '', address: ''
+      instagram: '', phone: '', address: '', website: '',
+      assets: [], pricing: [], slogans: [],
+      appStoreUrl: '', playStoreUrl: '',
     });
     setEditingId(null);
     setIsEditing(false);
+    setTempAssetImage(null);
+    setTempAssetName('');
+    setTempAssetDescription('');
+    setTempAssetUsageRule('');
   };
 
   const handleCreateNew = () => {
@@ -83,6 +111,78 @@ const BrandManager: React.FC<BrandManagerProps> = ({ brands, setBrands }) => {
     newPalette.splice(index, 1);
     setNewBrand({ ...newBrand, palette: newPalette });
   };
+
+  // Asset handlers
+  const handleAssetImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      try {
+        const base64 = await resizeImageToRawBase64(e.target.files[0], 400);
+        setTempAssetImage(base64);
+      } catch { alert('Görsel yüklenemedi.'); }
+    }
+  };
+
+  const addAsset = () => {
+    if (!tempAssetName || !tempAssetImage) return;
+    const asset: BrandAsset = {
+      id: `asset-${Date.now()}`,
+      category: tempAssetCategory,
+      name: tempAssetName,
+      description: tempAssetDescription,
+      imageBase64: tempAssetImage,
+      usageRule: tempAssetUsageRule,
+      createdAt: Date.now(),
+    };
+    setNewBrand({ ...newBrand, assets: [...(newBrand.assets || []), asset] });
+    setTempAssetName(''); setTempAssetDescription(''); setTempAssetUsageRule(''); setTempAssetImage(null);
+  };
+
+  const removeAsset = (id: string) => {
+    setNewBrand({ ...newBrand, assets: (newBrand.assets || []).filter(a => a.id !== id) });
+  };
+
+  const addPricing = () => {
+    if (!tempPricingName || !tempPricingPrice) return;
+    const plan: BrandPricing = {
+      id: `plan-${Date.now()}`,
+      name: tempPricingName,
+      price: tempPricingPrice,
+      features: tempPricingFeatures.split(',').map(f => f.trim()).filter(Boolean),
+      highlighted: tempPricingHighlighted,
+    };
+    setNewBrand({ ...newBrand, pricing: [...(newBrand.pricing || []), plan] });
+    setTempPricingName(''); setTempPricingPrice(''); setTempPricingFeatures(''); setTempPricingHighlighted(false);
+  };
+
+  const removePricing = (id: string) => {
+    setNewBrand({ ...newBrand, pricing: (newBrand.pricing || []).filter(p => p.id !== id) });
+  };
+
+  const addSlogan = () => {
+    if (!tempSlogan.trim()) return;
+    setNewBrand({ ...newBrand, slogans: [...(newBrand.slogans || []), tempSlogan.trim()] });
+    setTempSlogan('');
+  };
+
+  const removeSlogan = (index: number) => {
+    const s = [...(newBrand.slogans || [])];
+    s.splice(index, 1);
+    setNewBrand({ ...newBrand, slogans: s });
+  };
+
+  const ASSET_CATEGORIES: { value: BrandAssetCategory; label: string; icon: string }[] = [
+    { value: 'qr_code', label: 'QR Kod', icon: '📱' },
+    { value: 'app_store_badge', label: 'App Store Badge', icon: '🍎' },
+    { value: 'play_store_badge', label: 'Play Store Badge', icon: '▶️' },
+    { value: 'app_icon', label: 'Uygulama İkonu', icon: '📲' },
+    { value: 'social_icon', label: 'Sosyal Medya İkonu', icon: '💬' },
+    { value: 'product_photo', label: 'Ürün Fotoğrafı', icon: '📦' },
+    { value: 'badge', label: 'Güven Rozeti', icon: '🏅' },
+    { value: 'custom_icon', label: 'Özel İkon', icon: '✨' },
+    { value: 'watermark', label: 'Watermark', icon: '💧' },
+    { value: 'pattern', label: 'Desen/Pattern', icon: '🎨' },
+    { value: 'other', label: 'Diğer', icon: '📎' },
+  ];
 
   const saveBrand = () => {
     if (!newBrand.name) return;
@@ -349,14 +449,168 @@ const BrandManager: React.FC<BrandManagerProps> = ({ brands, setBrands }) => {
 
             </div>
           </div>
+
+          {/* ═══ ASSET VAULT ═══ */}
+          <div className="mt-6 pt-6 border-t border-lumina-800">
+            <h4 className="text-sm font-bold text-lumina-gold uppercase tracking-wider mb-4 flex items-center gap-2">
+              <Package size={16} /> Marka Varlık Kasası (Asset Vault)
+            </h4>
+            <p className="text-xs text-slate-500 mb-4">QR kod, app store ikonları, güven rozetleri gibi gerçek marka varlıklarını yükleyin. AI üretim sırasında hangisini kullanacağına otomatik karar verir.</p>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              {/* Left: Add Asset Form */}
+              <div className="lg:col-span-1 bg-lumina-950 border border-lumina-800 rounded-xl p-4 space-y-3">
+                <p className="text-xs font-bold text-white">Yeni Varlık Ekle</p>
+                <select
+                  value={tempAssetCategory}
+                  onChange={e => setTempAssetCategory(e.target.value as BrandAssetCategory)}
+                  className="w-full bg-lumina-900 border border-lumina-800 rounded-lg px-2 py-2 text-xs text-white focus:outline-none focus:border-lumina-gold/50"
+                >
+                  {ASSET_CATEGORIES.map(c => (
+                    <option key={c.value} value={c.value}>{c.icon} {c.label}</option>
+                  ))}
+                </select>
+                <input
+                  type="text" value={tempAssetName} onChange={e => setTempAssetName(e.target.value)}
+                  className="w-full bg-lumina-900 border border-lumina-800 rounded-lg px-2 py-2 text-xs text-white focus:outline-none focus:border-lumina-gold/50"
+                  placeholder="Varlık adı (QR Kod — Uygulama İndirme)"
+                />
+                <input
+                  type="text" value={tempAssetDescription} onChange={e => setTempAssetDescription(e.target.value)}
+                  className="w-full bg-lumina-900 border border-lumina-800 rounded-lg px-2 py-2 text-xs text-white focus:outline-none focus:border-lumina-gold/50"
+                  placeholder="Açıklama (ne zaman kullanılmalı)"
+                />
+                <input
+                  type="text" value={tempAssetUsageRule} onChange={e => setTempAssetUsageRule(e.target.value)}
+                  className="w-full bg-lumina-900 border border-lumina-800 rounded-lg px-2 py-2 text-xs text-white focus:outline-none focus:border-lumina-gold/50"
+                  placeholder="AI Kuralı (Use when topic mentions app download)"
+                />
+                <label className="block cursor-pointer">
+                  <div className={`border-2 border-dashed rounded-lg p-3 text-center transition-all ${tempAssetImage ? 'border-lumina-gold bg-lumina-900' : 'border-lumina-800 hover:border-slate-600'}`}>
+                    <input type="file" onChange={handleAssetImageUpload} className="hidden" accept="image/*" />
+                    {tempAssetImage ? (
+                      <img src={`data:image/png;base64,${tempAssetImage}`} alt="Preview" className="h-16 mx-auto object-contain" />
+                    ) : (
+                      <span className="text-xs text-slate-500">Görsel Yükle (PNG önerilir)</span>
+                    )}
+                  </div>
+                </label>
+                <button onClick={addAsset} disabled={!tempAssetName || !tempAssetImage}
+                  className="w-full py-2 rounded-lg text-xs font-bold bg-lumina-gold/20 text-lumina-gold border border-lumina-gold/30 hover:bg-lumina-gold/30 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                >
+                  <Plus size={12} className="inline mr-1" /> Varlık Ekle
+                </button>
+              </div>
+
+              {/* Right: Asset List */}
+              <div className="lg:col-span-2 space-y-2 max-h-64 overflow-y-auto pr-1 custom-scrollbar">
+                {(newBrand.assets || []).map(asset => (
+                  <div key={asset.id} className="flex items-center gap-3 bg-lumina-950 border border-lumina-800 rounded-lg p-2.5 group">
+                    <img src={`data:image/png;base64,${asset.imageBase64}`} alt={asset.name} className="w-12 h-12 object-contain rounded bg-white/5 p-1 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs">{ASSET_CATEGORIES.find(c => c.value === asset.category)?.icon}</span>
+                        <p className="text-xs font-bold text-white truncate">{asset.name}</p>
+                      </div>
+                      <p className="text-[10px] text-slate-500 truncate">{asset.description || asset.usageRule}</p>
+                    </div>
+                    <button onClick={() => removeAsset(asset.id)} className="text-slate-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                      <X size={14} />
+                    </button>
+                  </div>
+                ))}
+                {(!newBrand.assets || newBrand.assets.length === 0) && (
+                  <div className="text-center py-8 text-slate-600">
+                    <Package size={24} className="mx-auto mb-2 opacity-30" />
+                    <p className="text-xs">Henüz varlık eklenmedi</p>
+                    <p className="text-[10px] text-slate-700 mt-1">QR kod, App Store badge, ürün fotoğrafı vb.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* App Store URLs */}
+            <div className="grid grid-cols-2 gap-3 mt-4">
+              <input
+                type="text" value={newBrand.appStoreUrl || ''} onChange={e => setNewBrand({...newBrand, appStoreUrl: e.target.value})}
+                className="bg-lumina-950 border border-lumina-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-lumina-gold/50"
+                placeholder="App Store URL"
+              />
+              <input
+                type="text" value={newBrand.playStoreUrl || ''} onChange={e => setNewBrand({...newBrand, playStoreUrl: e.target.value})}
+                className="bg-lumina-950 border border-lumina-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-lumina-gold/50"
+                placeholder="Play Store URL"
+              />
+            </div>
+
+            {/* Slogans */}
+            <div className="mt-4">
+              <p className="text-xs font-bold text-white mb-2">Sloganlar / Tagline'lar</p>
+              <div className="flex gap-2 mb-2">
+                <input
+                  type="text" value={tempSlogan} onChange={e => setTempSlogan(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && addSlogan()}
+                  className="flex-1 bg-lumina-950 border border-lumina-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-lumina-gold/50"
+                  placeholder="Slogan ekle (Enter ile)"
+                />
+                <button onClick={addSlogan} className="px-3 py-2 bg-lumina-800 text-white text-xs rounded-lg hover:bg-lumina-700"><Plus size={12} /></button>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {(newBrand.slogans || []).map((s, i) => (
+                  <span key={i} className="flex items-center gap-1 bg-lumina-950 border border-lumina-800 text-xs text-slate-300 px-2 py-1 rounded-full">
+                    "{s}"
+                    <button onClick={() => removeSlogan(i)} className="text-slate-600 hover:text-red-400"><X size={10} /></button>
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {/* Pricing Plans */}
+            <div className="mt-4">
+              <p className="text-xs font-bold text-white mb-2">Fiyatlandırma Planları</p>
+              <div className="flex gap-2 mb-2">
+                <input type="text" value={tempPricingName} onChange={e => setTempPricingName(e.target.value)}
+                  className="flex-1 bg-lumina-950 border border-lumina-800 rounded-lg px-2 py-2 text-xs text-white focus:outline-none focus:border-lumina-gold/50"
+                  placeholder="Plan adı"
+                />
+                <input type="text" value={tempPricingPrice} onChange={e => setTempPricingPrice(e.target.value)}
+                  className="w-24 bg-lumina-950 border border-lumina-800 rounded-lg px-2 py-2 text-xs text-white focus:outline-none focus:border-lumina-gold/50"
+                  placeholder="$9.99/mo"
+                />
+                <input type="text" value={tempPricingFeatures} onChange={e => setTempPricingFeatures(e.target.value)}
+                  className="flex-1 bg-lumina-950 border border-lumina-800 rounded-lg px-2 py-2 text-xs text-white focus:outline-none focus:border-lumina-gold/50"
+                  placeholder="Özellikler (virgülle ayır)"
+                />
+                <label className="flex items-center gap-1 text-xs text-slate-400 cursor-pointer shrink-0">
+                  <input type="checkbox" checked={tempPricingHighlighted} onChange={e => setTempPricingHighlighted(e.target.checked)} className="accent-lumina-gold" />
+                  <Star size={12} />
+                </label>
+                <button onClick={addPricing} className="px-3 py-2 bg-lumina-800 text-white text-xs rounded-lg hover:bg-lumina-700"><Plus size={12} /></button>
+              </div>
+              <div className="space-y-1.5">
+                {(newBrand.pricing || []).map(plan => (
+                  <div key={plan.id} className={`flex items-center justify-between bg-lumina-950 border rounded-lg px-3 py-2 group ${plan.highlighted ? 'border-lumina-gold/50' : 'border-lumina-800'}`}>
+                    <div className="flex items-center gap-3">
+                      {plan.highlighted && <Star size={12} className="text-lumina-gold shrink-0" />}
+                      <span className="text-xs font-bold text-white">{plan.name}</span>
+                      <span className="text-xs text-lumina-gold font-mono">{plan.price}</span>
+                      <span className="text-[10px] text-slate-500 truncate max-w-48">{plan.features.join(' · ')}</span>
+                    </div>
+                    <button onClick={() => removePricing(plan.id)} className="text-slate-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"><X size={14} /></button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
           <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-lumina-800">
-            <button 
+            <button
               onClick={resetForm}
               className="px-6 py-2 text-slate-400 hover:text-white transition-colors"
             >
               Vazgeç
             </button>
-            <button 
+            <button
               onClick={saveBrand}
               className="bg-lumina-gold text-lumina-950 px-8 py-2 rounded-lg font-bold hover:bg-yellow-500 flex items-center gap-2 shadow-lg shadow-yellow-500/20"
             >
@@ -417,6 +671,19 @@ const BrandManager: React.FC<BrandManagerProps> = ({ brands, setBrands }) => {
                 <div className="flex items-center gap-2 text-xs text-slate-500">
                   <Phone size={14} className="text-lumina-gold" />
                   <span className="truncate">{brand.phone}</span>
+                </div>
+              )}
+              {brand.assets && brand.assets.length > 0 && (
+                <div className="flex items-center gap-2 text-xs text-slate-500">
+                  <Package size={14} className="text-lumina-gold" />
+                  <span>{brand.assets.length} varlık</span>
+                  <span className="text-slate-600">({brand.assets.map(a => ASSET_CATEGORIES_MAP[a.category] || a.category).filter((v, i, arr) => arr.indexOf(v) === i).join(', ')})</span>
+                </div>
+              )}
+              {brand.slogans && brand.slogans.length > 0 && (
+                <div className="flex items-center gap-2 text-xs text-slate-500">
+                  <Tag size={14} className="text-lumina-gold" />
+                  <span className="truncate italic">"{brand.slogans[0]}"</span>
                 </div>
               )}
             </div>

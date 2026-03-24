@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { Brand, StyleAnalysis, DesignBlueprint, BlueprintLayer } from "../types";
+import { Brand, StyleAnalysis, DesignBlueprint, BlueprintLayer, BrandAsset, BrandPricing } from "../types";
 
 // Content plan: AI-generated text for each layer
 export interface ContentPlan {
@@ -335,7 +335,8 @@ export const reconstructFromBlueprint = async (
   referenceImageBase64: string | null,
   productImageBase64: string | null,
   contentPlan?: ContentPlan | null,
-  directives?: DesignDirectives | null
+  directives?: DesignDirectives | null,
+  assetPlan?: AssetPlanResult | null
 ): Promise<string> => {
   if (window.aistudio && window.aistudio.hasSelectedApiKey) {
     const hasKey = await window.aistudio.hasSelectedApiKey();
@@ -480,10 +481,44 @@ export const reconstructFromBlueprint = async (
     ${directives.fullDirective}
     ` : ''}
 
+    ${assetPlan && assetPlan.decisions.some(d => d.shouldUse) ? `
+    ═══════════════════════════════════════════════════════════
+    MARKA VARLIKLARİ (AŞAĞIDAKİ ASSET'LERİ GÖRSELE EKLE)
+    ═══════════════════════════════════════════════════════════
+    ${assetPlan.decisions.filter(d => d.shouldUse).map(d => {
+      const asset = brand.assets?.find(a => a.id === d.assetId);
+      return asset ? `• ${asset.name} (${asset.category}) → Konum: ${d.placement}
+        Neden: ${d.reason}` : '';
+    }).filter(Boolean).join('\n    ')}
+    ${assetPlan.pricingToShow ? (() => {
+      const plan = brand.pricing?.find(p => p.id === assetPlan.pricingToShow);
+      return plan ? `
+    FİYATLANDIRMA BİLGİSİ (görsele ekle):
+    • Plan: ${plan.name}
+    • Fiyat: ${plan.price}
+    • Özellikler: ${plan.features.join(' | ')}` : '';
+    })() : ''}
+    ${assetPlan.sloganToUse ? `
+    SLOGAN (görsele ekle): "${assetPlan.sloganToUse}"` : ''}
+    Asset Stratejisi: ${assetPlan.overallStrategy}
+    ` : ''}
+
     KALİTE: 4K, profesyonel reklam ajansı kalitesinde.
   `;
 
   const parts: any[] = [];
+
+  // Inject approved brand assets as images
+  if (assetPlan) {
+    const approvedAssets = assetPlan.decisions.filter(d => d.shouldUse);
+    for (const decision of approvedAssets) {
+      const asset = brand.assets?.find(a => a.id === decision.assetId);
+      if (asset?.imageBase64) {
+        parts.push({ text: `MARKA ASSET — ${asset.name} (${decision.placement} konumuna yerleştir):` });
+        parts.push({ inlineData: { mimeType: 'image/png', data: asset.imageBase64 } });
+      }
+    }
+  }
 
   if (referenceImageBase64) {
     parts.push({ text: "REFERANS GÖRSEL (yapı ve layout kaynağı — renkleri DEĞİL, sadece yapıyı kopyala):" });
@@ -761,6 +796,121 @@ export const generateContentPlan = async (
   const text = response.text;
   if (!text) throw new Error("İçerik planı oluşturulamadı.");
   return JSON.parse(text) as ContentPlan;
+};
+
+// ══════════════════════════════════════════════════════════════
+// 1.6 Asset Decision Agent — decides which brand assets to use
+// ══════════════════════════════════════════════════════════════
+export interface AssetDecision {
+  assetId: string;
+  shouldUse: boolean;
+  placement: string;      // Where in the design: "bottom-right", "center", "badge area"
+  reason: string;         // Why use/skip this asset
+}
+
+export interface AssetPlanResult {
+  decisions: AssetDecision[];
+  pricingToShow: string | null;  // Which pricing plan to highlight (id or null)
+  sloganToUse: string | null;    // Which slogan to use (or null)
+  overallStrategy: string;       // Brief explanation of asset strategy
+}
+
+export const decideAssetUsage = async (
+  brand: Brand,
+  topic: string,
+  blueprint: DesignBlueprint | null
+): Promise<AssetPlanResult> => {
+  const ai = getAI();
+
+  const assets = brand.assets || [];
+  const pricing = brand.pricing || [];
+  const slogans = brand.slogans || [];
+
+  if (assets.length === 0 && pricing.length === 0 && slogans.length === 0) {
+    return { decisions: [], pricingToShow: null, sloganToUse: null, overallStrategy: 'No brand assets available.' };
+  }
+
+  const assetList = assets.map((a, i) => `Asset ${i + 1} (ID: ${a.id}):
+  - Category: ${a.category}
+  - Name: ${a.name}
+  - Description: ${a.description}
+  - Usage Rule: ${a.usageRule}`).join('\n\n');
+
+  const pricingList = pricing.map((p, i) => `Plan ${i + 1} (ID: ${p.id}):
+  - Name: ${p.name}
+  - Price: ${p.price}
+  - Features: ${p.features.join(', ')}
+  - Highlighted: ${p.highlighted ? 'YES' : 'no'}`).join('\n\n');
+
+  const sloganList = slogans.map((s, i) => `${i + 1}. "${s}"`).join('\n');
+
+  const layerInfo = blueprint ? `Blueprint has ${blueprint.layers.length} layers. Layout: ${blueprint.layout.type}, Style: ${blueprint.canvas.style}` : 'No blueprint available.';
+
+  const prompt = `
+    You are a Senior Art Director making asset decisions for a brand creative.
+
+    BRAND: ${brand.name} (${brand.industry})
+    TOPIC: "${topic}"
+    DESIGN INFO: ${layerInfo}
+
+    AVAILABLE BRAND ASSETS:
+    ${assetList || 'None'}
+
+    PRICING PLANS:
+    ${pricingList || 'None'}
+
+    SLOGANS:
+    ${sloganList || 'None'}
+
+    TASK: Decide which assets, pricing info, and slogans should be used in this creative.
+
+    DECISION RULES:
+    1. QR codes → Use ONLY when the topic relates to app download, sign-up, or "scan to get"
+    2. App Store / Play Store badges → Use when topic is about mobile app promotion
+    3. Product photos → Use when topic showcases a specific product
+    4. Pricing → Use when topic is about offers, plans, or comparisons
+    5. Slogans → Choose the most relevant one for this topic's mood
+    6. DON'T overcrowd — max 2-3 assets per creative
+    7. Consider the design layout — assets need physical space to fit
+    8. App icon → Use when the topic is app-focused
+    9. Trust badges → Use for credibility topics (reviews, awards, certifications)
+
+    For each asset, suggest a placement area in the design.
+  `;
+
+  const response = await ai.models.generateContent({
+    model: 'gemini-3-flash-preview',
+    contents: prompt,
+    config: {
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          decisions: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                assetId: { type: Type.STRING },
+                shouldUse: { type: Type.BOOLEAN },
+                placement: { type: Type.STRING },
+                reason: { type: Type.STRING },
+              },
+              required: ['assetId', 'shouldUse', 'placement', 'reason'],
+            },
+          },
+          pricingToShow: { type: Type.STRING },
+          sloganToUse: { type: Type.STRING },
+          overallStrategy: { type: Type.STRING },
+        },
+        required: ['decisions', 'overallStrategy'],
+      },
+    },
+  });
+
+  const text = response.text;
+  if (!text) return { decisions: [], pricingToShow: null, sloganToUse: null, overallStrategy: 'Decision failed.' };
+  return JSON.parse(text) as AssetPlanResult;
 };
 
 // 1.5 Smart Matching Logic
