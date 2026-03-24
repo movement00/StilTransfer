@@ -1216,67 +1216,104 @@ export const scoreDesignQuality = async (
 };
 
 // ══════════════════════════════════════════════════
-// 7. Pipeline: AI-powered topic generation for brand
+// 7. Pipeline: AI-powered topic generation for brand (reference-image-aware)
 // ══════════════════════════════════════════════════
 export const generatePipelineTopics = async (
   brand: Brand,
   count: number,
-  aspectRatio: string
+  aspectRatio: string,
+  referenceImages?: { base64: string; name: string }[]
 ): Promise<string[]> => {
   const ai = getAI();
 
   const formatMap: Record<string, string> = {
-    '1:1': 'Instagram kare post',
-    '4:5': 'Instagram portre post',
+    '1:1': 'Instagram square post',
+    '4:5': 'Instagram portrait post',
     '9:16': 'Instagram/TikTok Story',
     '16:9': 'YouTube thumbnail / LinkedIn banner',
   };
-  const format = formatMap[aspectRatio] || 'sosyal medya gönderi';
+  const format = formatMap[aspectRatio] || 'social media post';
 
   const today = new Date();
-  const monthNames = ['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
+  const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
   const currentMonth = monthNames[today.getMonth()];
   const currentYear = today.getFullYear();
 
+  const hasRefs = referenceImages && referenceImages.length > 0;
+
   const prompt = `
-    Sen dünyanın en büyük reklam ajanslarında (Wieden+Kennedy, Ogilvy, BBDO) çalışmış,
-    Cannes Lions ödüllü bir Kreatif Direktör ve Sosyal Medya Stratejistisin.
+    You are a world-class Creative Director and Social Media Strategist who has worked at
+    top agencies like Wieden+Kennedy, Ogilvy, and BBDO. You have won multiple Cannes Lions awards.
 
-    MARKA BİLGİSİ:
-    - İsim: ${brand.name}
-    - Sektör: ${brand.industry}
-    - Açıklama: ${brand.description || 'Belirtilmemiş'}
-    - Marka Tonu: ${brand.tone}
-    - Renk Paleti: ${brand.palette.map(c => `${c.name} (${c.hex})`).join(', ')}
+    BRAND INFO:
+    - Name: ${brand.name}
+    - Industry: ${brand.industry}
+    - Description: ${brand.description || 'Not specified'}
+    - Brand Tone: ${brand.tone}
+    - Color Palette: ${brand.palette.map(c => `${c.name} (${c.hex})`).join(', ')}
+    ${brand.instagram ? `- Instagram: @${brand.instagram}` : ''}
 
-    TARİH: ${currentMonth} ${currentYear}
+    DATE: ${currentMonth} ${currentYear}
     FORMAT: ${format} (${aspectRatio})
 
-    GÖREV: Bu marka için tam olarak ${count} adet REKLAM GÖRSELİ KONUSU üret.
-    Her konu bir tasarımcıya brief olarak verilecek — yani görsel olarak tasarlanabilir,
-    somut ve spesifik olmalı.
+    ${hasRefs ? `
+    CRITICAL — REFERENCE IMAGES PROVIDED:
+    I have uploaded ${referenceImages!.length} reference image(s). These are DESIGN REFERENCES
+    that show the visual style and layout we want to replicate.
 
-    ÖNEMLİ KURALLAR:
-    1. Her konu bir REKLAM GÖRSELİ teması olacak (poster, banner, sosyal medya görseli)
-    2. Soyut değil SOMUT ol: "Yaz kampanyası" yerine "${brand.name} Yaz İndirimi — Seçili Ürünlerde %40'a Varan Fırsatlar" gibi
-    3. Her konuda markanın sektörüne (${brand.industry}) özgü ürün/hizmet/değer önerisi olsun
-    4. Konu çeşitliliği sağla:
-       - Ürün/hizmet tanıtımı (en az 2)
-       - Kampanya/indirim/fırsat görseli (en az 1)
-       - Motivasyonel/ilham verici paylaşım (en az 1)
-       - Sezonsal/güncel etkinlik (${currentMonth} ${currentYear} için uygun)
-       - Müşteri güveni/sosyal kanıt (referans, başarı hikayesi)
-       - Bilgilendirici/eğitici içerik (sektörel ipucu, nasıl yapılır)
-    5. Her konu 1-2 cümle, Türkçe
-    6. Görselde kullanılacak ana mesaj/slogan önerisi de konuya dahil olsun
-    7. Markanın tonuna (${brand.tone}) sadık kal
-    8. Konular birbirinden FARKLI olsun, tekrar etme
-    9. Gerçek bir markanın gerçekten paylaşabileceği, profesyonel konular olsun
+    ANALYZE EACH REFERENCE IMAGE carefully and generate topics that:
+    1. MATCH the visual theme/mood of each reference (e.g. if image shows food photography, generate food-related topics)
+    2. FIT the layout structure (e.g. if image has a big headline + small subtext, the topic should have a punchy headline idea)
+    3. COMPLEMENT the reference's aesthetic (minimalist → clean topic, bold → energetic topic)
+    4. Are DIFFERENT from each other — each reference should inspire unique topics
+    5. If there are more topics than references, distribute evenly and create variations
+
+    Generate topics that a designer can execute using these exact reference styles.
+    ` : `
+    No reference images provided — generate topics purely based on brand identity.
+    `}
+
+    TASK: Generate exactly ${count} AD VISUAL TOPICS for this brand.
+    Each topic will be given to a designer as a brief — so it must be visually designable,
+    concrete, and specific.
+
+    IMPORTANT RULES:
+    1. Each topic is a theme for an AD VISUAL (poster, banner, social media visual)
+    2. Be CONCRETE not abstract: Instead of "Summer campaign" write "${brand.name} Summer Sale — Up to 40% Off Selected Products"
+    3. Each topic must include a product/service/value proposition specific to ${brand.industry}
+    4. Ensure topic variety:
+       - Product/service showcase (at least 2)
+       - Campaign/discount/offer visual (at least 1)
+       - Motivational/inspirational post (at least 1)
+       - Seasonal/current event (suitable for ${currentMonth} ${currentYear})
+       - Customer trust/social proof (testimonial, success story)
+       - Educational/informative content (industry tip, how-to)
+    5. Each topic should be 1-2 sentences
+    6. Include a main message/slogan suggestion in each topic
+    7. Stay true to the brand tone (${brand.tone})
+    8. Topics must be UNIQUE — no repetition
+    9. These should be professional topics that a real brand would actually post
+
+    OUTPUT LANGUAGE: English — all topics must be written in English.
   `;
 
+  const parts: any[] = [];
+
+  // Attach reference images if available
+  if (hasRefs) {
+    referenceImages!.forEach((img, i) => {
+      parts.push({ text: `REFERENCE IMAGE ${i + 1} (${img.name}):` });
+      parts.push({ inlineData: { mimeType: 'image/jpeg', data: img.base64 } });
+    });
+  }
+
+  parts.push({ text: prompt });
+
+  const contents = hasRefs ? { parts } : { text: prompt };
+
   const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash',
-    contents: prompt,
+    model: hasRefs ? 'gemini-3-pro-preview' : 'gemini-2.5-flash',
+    contents,
     config: {
       responseMimeType: 'application/json',
       responseSchema: {

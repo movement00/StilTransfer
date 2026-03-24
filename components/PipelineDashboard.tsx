@@ -181,7 +181,11 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
     if (!brand) return;
     setIsGeneratingTopics(true);
     try {
-      const generated = await generatePipelineTopics(brand, topicCount, aspectRatio);
+      // Pass reference images so AI can analyze them and generate matching topics
+      const refs = referenceImages.length > 0
+        ? referenceImages.map(img => ({ base64: img.base64, name: img.name }))
+        : undefined;
+      const generated = await generatePipelineTopics(brand, topicCount, aspectRatio, refs);
       if (generated.length > 0) {
         setTopicsText(generated.join('\n'));
       } else {
@@ -509,9 +513,9 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
                 className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium bg-indigo-500/15 text-indigo-400 border border-indigo-500/30 hover:bg-indigo-500/25 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {isGeneratingTopics ? (
-                  <><Loader2 size={12} className="animate-spin" /> Üretiliyor...</>
+                  <><Loader2 size={12} className="animate-spin" /> {referenceImages.length > 0 ? 'Görseller analiz ediliyor...' : 'Üretiliyor...'}</>
                 ) : (
-                  <><Sparkles size={12} /> AI ile {topicCount} Konu Üret</>
+                  <><Sparkles size={12} /> {referenceImages.length > 0 ? `Görsellerden ${topicCount} Konu Üret` : `AI ile ${topicCount} Konu Üret`}</>
                 )}
               </button>
             </div>
