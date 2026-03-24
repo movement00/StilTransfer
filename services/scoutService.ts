@@ -63,12 +63,13 @@ async function supabaseRest(table: string, method: string, body?: any, query?: s
   return null;
 }
 
-// Search for inspiration images
+// Search for inspiration images (with pagination)
 export async function searchInspiration(
   query: string,
   sources: string[] = ['duckduckgo', 'pinterest', 'google'],
-  industry?: string
-): Promise<{ results: ScoutResult[]; sourcesReport: Record<string, number> }> {
+  industry?: string,
+  page: number = 0
+): Promise<{ results: ScoutResult[]; sourcesReport: Record<string, number>; hasMore: boolean }> {
   const backend = await getBackendUrl();
 
   try {
@@ -79,7 +80,7 @@ export async function searchInspiration(
       resp = await fetch(`${backend}/search`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query, sources, industry: industry || '' }),
+        body: JSON.stringify({ query, sources, industry: industry || '', page }),
       });
     } else {
       // Supabase Edge Function
@@ -96,9 +97,10 @@ export async function searchInspiration(
     return {
       results: (data.results || []).map((r: any, i: number) => ({
         ...r,
-        id: `scout-${Date.now()}-${i}`,
+        id: `scout-${Date.now()}-${page}-${i}`,
       })),
       sourcesReport: data.sources_report || {},
+      hasMore: data.has_more ?? true,
     };
   } catch (err) {
     console.error('Scout search error:', err);
@@ -106,9 +108,9 @@ export async function searchInspiration(
     if (backend === SCRAPER_URL) {
       _backendUrl = null;
       console.log('Scrapling backend failed, trying Edge Function...');
-      return searchInspiration(query, sources, industry);
+      return searchInspiration(query, sources, industry, page);
     }
-    return { results: [], sourcesReport: {} };
+    return { results: [], sourcesReport: {}, hasMore: false };
   }
 }
 

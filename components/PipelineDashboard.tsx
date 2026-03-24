@@ -71,6 +71,9 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
   const [isScoutDownloading, setIsScoutDownloading] = useState(false);
   const [scoredResults, setScoredResults] = useState<Map<string, { score: number; reason: string }>>(new Map());
   const [isScoring, setIsScoring] = useState(false);
+  const [scoutPage, setScoutPage] = useState(0);
+  const [scoutHasMore, setScoutHasMore] = useState(true);
+  const [isLoadingMoreScout, setIsLoadingMoreScout] = useState(false);
 
   // Run state
   const [currentRun, setCurrentRun] = useState<PipelineRun | null>(null);
@@ -177,10 +180,20 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
     if (!brand) return;
     setIsGeneratingTopics(true);
     try {
-      const topics = await generatePipelineTopics(brand, topicCount, aspectRatio);
-      setTopicsText(topics.join('\n'));
+      const generated = await generatePipelineTopics(brand, topicCount, aspectRatio);
+      if (generated.length > 0) {
+        setTopicsText(generated.join('\n'));
+      } else {
+        setTopicsText('');
+        alert('Konu üretilemedi. API anahtarınızı kontrol edin.');
+      }
     } catch (err: any) {
       console.error('Topic generation error:', err);
+      if (err.message?.includes('API_KEY_MISSING')) {
+        alert('Gemini API anahtarı bulunamadı. Sol menüden API Ayarları\'na girin.');
+      } else {
+        alert(`Konu üretme hatası: ${err.message || 'Bilinmeyen hata'}`);
+      }
     } finally {
       setIsGeneratingTopics(false);
     }
@@ -193,13 +206,17 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
     setScoutResults([]);
     setScoredResults(new Map());
     setScoutSelected(new Set());
+    setScoutPage(0);
+    setScoutHasMore(true);
     try {
-      const { results } = await searchInspiration(
+      const { results, hasMore } = await searchInspiration(
         scoutQuery,
         ['duckduckgo', 'pinterest', 'google'],
-        selectedBrand?.industry
+        selectedBrand?.industry,
+        0
       );
       setScoutResults(results);
+      setScoutHasMore(hasMore && results.length > 0);
       // Auto-score results
       if (results.length > 0 && selectedBrand) {
         setIsScoring(true);
@@ -223,6 +240,34 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
       console.error('Scout search error:', err);
     } finally {
       setIsScoutSearching(false);
+    }
+  };
+
+  // Scout: Load more results
+  const handleScoutLoadMore = async () => {
+    if (isLoadingMoreScout || !scoutHasMore) return;
+    setIsLoadingMoreScout(true);
+    const nextPage = scoutPage + 1;
+    try {
+      const { results, hasMore } = await searchInspiration(
+        scoutQuery,
+        ['duckduckgo', 'pinterest', 'google'],
+        selectedBrand?.industry,
+        nextPage
+      );
+      if (results.length > 0) {
+        const existingUrls = new Set(scoutResults.map(r => r.imageUrl));
+        const newResults = results.filter(r => !existingUrls.has(r.imageUrl));
+        setScoutResults(prev => [...prev, ...newResults]);
+        setScoutPage(nextPage);
+        setScoutHasMore(hasMore && newResults.length > 0);
+      } else {
+        setScoutHasMore(false);
+      }
+    } catch (err) {
+      console.error('Load more error:', err);
+    } finally {
+      setIsLoadingMoreScout(false);
     }
   };
 
@@ -900,6 +945,7 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
                   {isScoring && <p className="text-xs text-indigo-400 mt-1">AI kalite puanlaması yapılıyor...</p>}
                 </div>
               ) : scoutResults.length > 0 ? (
+                <>
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
                   {scoutResults.map(result => {
                     const isSelected = scoutSelected.has(result.id);
@@ -948,6 +994,24 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
                     );
                   })}
                 </div>
+
+                {/* Load More Button */}
+                {scoutHasMore && (
+                  <div className="flex justify-center mt-4 pb-2">
+                    <button
+                      onClick={handleScoutLoadMore}
+                      disabled={isLoadingMoreScout}
+                      className="flex items-center gap-2 px-5 py-2 bg-lumina-900 border border-lumina-800 text-white rounded-lg hover:bg-lumina-800 transition-all text-xs disabled:opacity-50"
+                    >
+                      {isLoadingMoreScout ? (
+                        <><Loader2 size={14} className="animate-spin" /> Yükleniyor...</>
+                      ) : (
+                        <>Daha Fazla Görsel</>
+                      )}
+                    </button>
+                  </div>
+                )}
+                </>
               ) : (
                 <div className="flex flex-col items-center justify-center py-16 text-slate-500">
                   <Search size={32} className="mb-3 opacity-30" />
