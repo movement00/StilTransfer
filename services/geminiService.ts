@@ -559,3 +559,69 @@ export const scoreDesignQuality = async (
 
   return { scores, reasons };
 };
+
+// ══════════════════════════════════════════════════
+// 7. Pipeline: AI-powered topic generation for brand
+// ══════════════════════════════════════════════════
+export const generatePipelineTopics = async (
+  brand: Brand,
+  count: number,
+  aspectRatio: string
+): Promise<string[]> => {
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+
+  const formatMap: Record<string, string> = {
+    '1:1': 'Instagram kare post',
+    '4:5': 'Instagram portre post',
+    '9:16': 'Instagram/TikTok Story',
+    '16:9': 'YouTube thumbnail / LinkedIn banner',
+  };
+  const format = formatMap[aspectRatio] || 'sosyal medya gönderi';
+
+  const prompt = `
+    Sen dünya çapında ödüllü bir sosyal medya içerik stratejistisin.
+
+    MARKA BİLGİSİ:
+    - İsim: ${brand.name}
+    - Sektör: ${brand.industry}
+    - Açıklama: ${brand.description || 'Yok'}
+    - Ton: ${brand.tone}
+    - Renkler: ${brand.palette.map(c => `${c.name} (${c.hex})`).join(', ')}
+
+    FORMAT: ${format} (${aspectRatio})
+
+    GÖREV: Bu marka için tam olarak ${count} adet sosyal medya içerik konusu üret.
+
+    KURALLAR:
+    1. Her konu kısa ve görsel tasarım için uygun olmalı (1-2 cümle max)
+    2. Konular çeşitli olmalı: tanıtım, kampanya, motivasyon, bilgi, etkileşim, sezonsal
+    3. Markanın sektörüne ve tonuna uygun olmalı
+    4. Türkçe yaz
+    5. Her konu bir sosyal medya görselinin başlığı/teması olacak
+    6. Gerçekçi ve uygulanabilir konular olsun
+    7. Güncel trendleri ve sezonsal fırsatları dahil et
+  `;
+
+  const response = await ai.models.generateContent({
+    model: 'gemini-2.5-flash-preview-05-20',
+    contents: prompt,
+    config: {
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          topics: {
+            type: Type.ARRAY,
+            items: { type: Type.STRING },
+          },
+        },
+        required: ['topics'],
+      },
+    },
+  });
+
+  const text = response.text;
+  if (!text) return [];
+  const parsed = JSON.parse(text);
+  return (parsed.topics || []).slice(0, count);
+};

@@ -3,14 +3,15 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Play, Square, RotateCcw, ChevronRight, CheckCircle2, XCircle,
   Loader2, Clock, Image, Upload, Trash2, Plus, Download, SkipForward,
-  Zap, ArrowRight, Settings2, FileText
+  Zap, ArrowRight, Settings2, FileText, Sparkles, Compass, Search, X, Check, Star
 } from 'lucide-react';
 import {
   Brand, PipelineConfig, PipelineRun, PipelineStep, PipelineResult,
-  PipelineImage, PipelineStepStatus, SavedTemplate, GeneratedAsset, TemplateFolder
+  PipelineImage, PipelineStepStatus, SavedTemplate, GeneratedAsset, TemplateFolder, ScoutResult
 } from '../types';
 import { pipelineService } from '../services/pipelineService';
-import { resizeImageToRawBase64 } from '../services/geminiService';
+import { resizeImageToRawBase64, generatePipelineTopics } from '../services/geminiService';
+import { searchInspiration, downloadImage, scoreAndRankResults } from '../services/scoutService';
 
 interface PipelineDashboardProps {
   brands: Brand[];
@@ -56,6 +57,20 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
   const [revisionPrompt, setRevisionPrompt] = useState('');
   const [saveAsTemplate, setSaveAsTemplate] = useState(true);
   const [pipelineName, setPipelineName] = useState('');
+
+  // AI Topics state
+  const [isGeneratingTopics, setIsGeneratingTopics] = useState(false);
+  const [topicCount, setTopicCount] = useState(5);
+
+  // Scout Picker state
+  const [showScoutPicker, setShowScoutPicker] = useState<'reference' | 'product' | null>(null);
+  const [scoutQuery, setScoutQuery] = useState('');
+  const [scoutResults, setScoutResults] = useState<ScoutResult[]>([]);
+  const [isScoutSearching, setIsScoutSearching] = useState(false);
+  const [scoutSelected, setScoutSelected] = useState<Set<string>>(new Set());
+  const [isScoutDownloading, setIsScoutDownloading] = useState(false);
+  const [scoredResults, setScoredResults] = useState<Map<string, { score: number; reason: string }>>(new Map());
+  const [isScoring, setIsScoring] = useState(false);
 
   // Run state
   const [currentRun, setCurrentRun] = useState<PipelineRun | null>(null);
@@ -155,6 +170,98 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
     }
     setter(prev => [...prev, ...newImages]);
   }, []);
+
+  // AI Topic Generation
+  const handleGenerateTopics = async () => {
+    const brand = brands.find(b => b.id === selectedBrandId);
+    if (!brand) return;
+    setIsGeneratingTopics(true);
+    try {
+      const topics = await generatePipelineTopics(brand, topicCount, aspectRatio);
+      setTopicsText(topics.join('\n'));
+    } catch (err: any) {
+      console.error('Topic generation error:', err);
+    } finally {
+      setIsGeneratingTopics(false);
+    }
+  };
+
+  // Scout Search
+  const handleScoutSearch = async () => {
+    if (!scoutQuery.trim()) return;
+    setIsScoutSearching(true);
+    setScoutResults([]);
+    setScoredResults(new Map());
+    setScoutSelected(new Set());
+    try {
+      const { results } = await searchInspiration(
+        scoutQuery,
+        ['duckduckgo', 'pinterest', 'google'],
+        selectedBrand?.industry
+      );
+      setScoutResults(results);
+      // Auto-score results
+      if (results.length > 0 && selectedBrand) {
+        setIsScoring(true);
+        try {
+          const scored = await scoreAndRankResults(results.slice(0, 18), selectedBrand, 6);
+          const scoreMap = new Map<string, { score: number; reason: string }>();
+          scored.forEach(s => scoreMap.set(s.result.id, { score: s.score, reason: s.reason }));
+          setScoredResults(scoreMap);
+          // Re-sort results by score
+          const sortedResults = [...results].sort((a, b) => {
+            const scoreA = scoreMap.get(a.id)?.score ?? 0;
+            const scoreB = scoreMap.get(b.id)?.score ?? 0;
+            return scoreB - scoreA;
+          });
+          setScoutResults(sortedResults);
+        } catch {} finally {
+          setIsScoring(false);
+        }
+      }
+    } catch (err) {
+      console.error('Scout search error:', err);
+    } finally {
+      setIsScoutSearching(false);
+    }
+  };
+
+  // Scout: Add selected images to pipeline
+  const handleScoutAddSelected = async () => {
+    if (scoutSelected.size === 0) return;
+    setIsScoutDownloading(true);
+    const targetSetter = showScoutPicker === 'product' ? setProductImages : setReferenceImages;
+
+    for (const id of scoutSelected) {
+      const result = scoutResults.find(r => r.id === id);
+      if (!result) continue;
+      try {
+        const { base64 } = await downloadImage(result.thumbnailUrl || result.imageUrl);
+        targetSetter(prev => [...prev, {
+          id: `scout-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          base64,
+          name: result.title || 'Scout Image',
+        }]);
+      } catch (err) {
+        console.error('Download failed:', err);
+      }
+    }
+
+    setIsScoutDownloading(false);
+    setShowScoutPicker(null);
+    setScoutResults([]);
+    setScoutSelected(new Set());
+    setScoutQuery('');
+  };
+
+  const toggleScoutSelect = (id: string) => {
+    setScoutSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   // Start pipeline
   const startPipeline = async () => {
@@ -317,9 +424,36 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
               onChange={e => setTopicsText(e.target.value)}
               placeholder={"Yeni sezon kayıtları başladı!\nBahar indirimi %30\nÖğrenci başarı hikayeleri\nKampüs turu davetiyesi"}
               rows={5}
-              className="w-full bg-lumina-950 border border-lumina-800 rounded-lg px-3 py-2 text-sm text-white mb-3 focus:outline-none focus:border-lumina-gold/50 resize-none"
+              className="w-full bg-lumina-950 border border-lumina-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-lumina-gold/50 resize-none"
               disabled={isRunning}
             />
+            {/* AI Topic Generation */}
+            <div className="flex items-center gap-2 mt-1.5 mb-3">
+              <div className="flex items-center gap-1 bg-lumina-950 border border-lumina-800 rounded-lg px-2 py-1">
+                <button
+                  onClick={() => setTopicCount(Math.max(1, topicCount - 1))}
+                  className="text-slate-400 hover:text-white text-xs px-1"
+                  disabled={isRunning || isGeneratingTopics}
+                >-</button>
+                <span className="text-xs text-white w-4 text-center">{topicCount}</span>
+                <button
+                  onClick={() => setTopicCount(Math.min(20, topicCount + 1))}
+                  className="text-slate-400 hover:text-white text-xs px-1"
+                  disabled={isRunning || isGeneratingTopics}
+                >+</button>
+              </div>
+              <button
+                onClick={handleGenerateTopics}
+                disabled={isRunning || isGeneratingTopics || !selectedBrandId}
+                className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium bg-indigo-500/15 text-indigo-400 border border-indigo-500/30 hover:bg-indigo-500/25 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {isGeneratingTopics ? (
+                  <><Loader2 size={12} className="animate-spin" /> Üretiliyor...</>
+                ) : (
+                  <><Sparkles size={12} /> AI ile {topicCount} Konu Üret</>
+                )}
+              </button>
+            </div>
 
             {/* Reference Images */}
             <label className="block text-xs text-slate-400 mb-1">
@@ -340,12 +474,23 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
                 </div>
               ))}
               {!isRunning && (
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="w-16 h-16 border-2 border-dashed border-lumina-800 rounded-lg flex items-center justify-center text-slate-500 hover:border-lumina-gold/50 hover:text-lumina-gold transition-all"
-                >
-                  <Plus size={20} />
-                </button>
+                <>
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="w-16 h-16 border-2 border-dashed border-lumina-800 rounded-lg flex items-center justify-center text-slate-500 hover:border-lumina-gold/50 hover:text-lumina-gold transition-all"
+                    title="Dosyadan yükle"
+                  >
+                    <Plus size={20} />
+                  </button>
+                  <button
+                    onClick={() => { setShowScoutPicker('reference'); setScoutQuery(selectedBrand?.industry + ' social media design inspiration' || ''); }}
+                    className="w-16 h-16 border-2 border-dashed border-indigo-500/30 rounded-lg flex flex-col items-center justify-center text-indigo-400 hover:border-indigo-500/60 hover:bg-indigo-500/5 transition-all"
+                    title="Web'den keşfet"
+                  >
+                    <Compass size={16} />
+                    <span className="text-[9px] mt-0.5">Keşfet</span>
+                  </button>
+                </>
               )}
             </div>
             <input
@@ -376,12 +521,23 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
                 </div>
               ))}
               {!isRunning && (
-                <button
-                  onClick={() => productInputRef.current?.click()}
-                  className="w-12 h-12 border-2 border-dashed border-lumina-800 rounded-lg flex items-center justify-center text-slate-500 hover:border-lumina-gold/50 hover:text-lumina-gold transition-all"
-                >
-                  <Plus size={16} />
-                </button>
+                <>
+                  <button
+                    onClick={() => productInputRef.current?.click()}
+                    className="w-12 h-12 border-2 border-dashed border-lumina-800 rounded-lg flex items-center justify-center text-slate-500 hover:border-lumina-gold/50 hover:text-lumina-gold transition-all"
+                    title="Dosyadan yükle"
+                  >
+                    <Plus size={16} />
+                  </button>
+                  <button
+                    onClick={() => { setShowScoutPicker('product'); setScoutQuery(selectedBrand?.name + ' product' || ''); }}
+                    className="w-12 h-12 border-2 border-dashed border-indigo-500/30 rounded-lg flex flex-col items-center justify-center text-indigo-400 hover:border-indigo-500/60 hover:bg-indigo-500/5 transition-all"
+                    title="Web'den keşfet"
+                  >
+                    <Compass size={12} />
+                    <span className="text-[8px] mt-0.5">Keşfet</span>
+                  </button>
+                </>
               )}
             </div>
             <input
@@ -649,6 +805,132 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
           )}
         </div>
       </div>
+
+      {/* ═══ Scout Picker Modal ═══ */}
+      {showScoutPicker && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-6">
+          <div className="bg-lumina-900 border border-lumina-800 rounded-2xl w-full max-w-4xl max-h-[85vh] flex flex-col overflow-hidden">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-5 border-b border-lumina-800">
+              <div className="flex items-center gap-3">
+                <Compass size={20} className="text-indigo-400" />
+                <div>
+                  <h3 className="text-white font-medium">
+                    {showScoutPicker === 'product' ? 'Ürün Görseli Keşfet' : 'Referans Görseli Keşfet'}
+                  </h3>
+                  <p className="text-xs text-slate-400">Web'den arayın, seçin, doğrudan pipeline'a ekleyin</p>
+                </div>
+              </div>
+              <button onClick={() => { setShowScoutPicker(null); setScoutResults([]); setScoutSelected(new Set()); }} className="text-slate-400 hover:text-white">
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Search Bar */}
+            <div className="p-4 border-b border-lumina-800">
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={scoutQuery}
+                  onChange={e => setScoutQuery(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleScoutSearch()}
+                  placeholder="Arama... (örn: modern education poster design)"
+                  className="flex-1 bg-lumina-950 border border-lumina-800 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-indigo-500/50"
+                />
+                <button
+                  onClick={handleScoutSearch}
+                  disabled={isScoutSearching || !scoutQuery.trim()}
+                  className="px-5 py-2.5 bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 rounded-lg hover:bg-indigo-500/30 transition-all disabled:opacity-40 flex items-center gap-2"
+                >
+                  {isScoutSearching ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
+                  Ara
+                </button>
+              </div>
+              {scoutSelected.size > 0 && (
+                <div className="flex items-center justify-between mt-3 p-2 bg-indigo-500/10 border border-indigo-500/20 rounded-lg">
+                  <span className="text-xs text-indigo-300">{scoutSelected.size} görsel seçildi</span>
+                  <button
+                    onClick={handleScoutAddSelected}
+                    disabled={isScoutDownloading}
+                    className="flex items-center gap-1.5 px-4 py-1.5 bg-indigo-500 text-white rounded-lg text-xs font-medium hover:bg-indigo-600 transition-all disabled:opacity-50"
+                  >
+                    {isScoutDownloading ? (
+                      <><Loader2 size={12} className="animate-spin" /> Ekleniyor...</>
+                    ) : (
+                      <><Check size={12} /> Pipeline'a Ekle</>
+                    )}
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Results Grid */}
+            <div className="flex-1 overflow-y-auto p-4">
+              {isScoutSearching ? (
+                <div className="flex flex-col items-center justify-center py-16">
+                  <Loader2 size={32} className="text-indigo-400 animate-spin" />
+                  <p className="text-slate-400 text-sm mt-3">Aranıyor...</p>
+                  {isScoring && <p className="text-xs text-indigo-400 mt-1">AI kalite puanlaması yapılıyor...</p>}
+                </div>
+              ) : scoutResults.length > 0 ? (
+                <div className="grid grid-cols-4 gap-3">
+                  {scoutResults.map(result => {
+                    const isSelected = scoutSelected.has(result.id);
+                    const scoreData = scoredResults.get(result.id);
+                    return (
+                      <div
+                        key={result.id}
+                        onClick={() => toggleScoutSelect(result.id)}
+                        className={`relative rounded-lg overflow-hidden border-2 cursor-pointer transition-all group ${
+                          isSelected
+                            ? 'border-indigo-500 shadow-lg shadow-indigo-500/20'
+                            : 'border-lumina-800 hover:border-lumina-700'
+                        }`}
+                      >
+                        <div className="aspect-square bg-lumina-950">
+                          <img
+                            src={result.thumbnailUrl || result.imageUrl}
+                            alt={result.title}
+                            className="w-full h-full object-cover"
+                            loading="lazy"
+                            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                          />
+                        </div>
+                        {/* Selection overlay */}
+                        {isSelected && (
+                          <div className="absolute top-2 right-2 w-6 h-6 bg-indigo-500 rounded-full flex items-center justify-center">
+                            <Check size={14} className="text-white" />
+                          </div>
+                        )}
+                        {/* Score badge */}
+                        {scoreData && (
+                          <div className={`absolute top-2 left-2 px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                            scoreData.score >= 70 ? 'bg-emerald-500/90 text-white' :
+                            scoreData.score >= 40 ? 'bg-amber-500/90 text-white' :
+                            'bg-red-500/90 text-white'
+                          }`}>
+                            <Star size={8} className="inline mr-0.5" />{scoreData.score}
+                          </div>
+                        )}
+                        {/* Platform badge */}
+                        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-2">
+                          <p className="text-[10px] text-white/80 truncate">{result.title}</p>
+                          <span className="text-[9px] text-slate-400">{result.platform}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-16 text-slate-500">
+                  <Search size={32} className="mb-3 opacity-30" />
+                  <p className="text-sm">Arama yaparak görselleri keşfedin</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
