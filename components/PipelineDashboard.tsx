@@ -65,6 +65,7 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
   const [revisingIds, setRevisingIds] = useState<Set<string>>(new Set());
   const [singleRevisionPrompts, setSingleRevisionPrompts] = useState<Record<string, string>>({});
   const [expandedRevision, setExpandedRevision] = useState<string | null>(null);
+  const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set());
 
   // AI Topics state
   const [isGeneratingTopics, setIsGeneratingTopics] = useState(false);
@@ -372,79 +373,180 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
     });
   };
 
+  // ═══ GROUP RESULTS BY BASE TOPIC ═══
+  const getBaseTopic = (topic: string) => topic.replace(/\s*\[.*?\]\s*$/, '');
+
+  const resultGroups = currentRun ? (() => {
+    const groups: Record<string, PipelineResult[]> = {};
+    currentRun.results.forEach(r => {
+      const base = getBaseTopic(r.topic);
+      if (!groups[base]) groups[base] = [];
+      groups[base].push(r);
+    });
+    return groups;
+  })() : {};
+
+  const toggleGroup = (baseTopic: string) => {
+    setSelectedGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(baseTopic)) next.delete(baseTopic);
+      else next.add(baseTopic);
+      return next;
+    });
+  };
+
+  const selectAllGroups = () => {
+    const allTopics = Object.keys(resultGroups).filter(t =>
+      resultGroups[t].some(r => r.generatedImageBase64 || r.revisedImageBase64)
+    );
+    setSelectedGroups(prev =>
+      prev.size === allTopics.length ? new Set() : new Set(allTopics)
+    );
+  };
+
   // ═══ REVISION HANDLERS ═══
-  const handleBulkRevision = async () => {
-    if (!currentRun || !bulkRevisionPrompt.trim()) return;
-    const completedResults = currentRun.results.filter(r => r.generatedImageBase64 || r.revisedImageBase64);
-    if (completedResults.length === 0) return;
+  // Chained revision: revise first image → use revised as reference for siblings
+  const handleGroupRevision = async () => {
+    if (!currentRun || !bulkRevisionPrompt.trim() || selectedGroups.size === 0) return;
 
     setIsRevising(true);
-    const newRevisingIds = new Set(completedResults.map(r => r.id));
-    setRevisingIds(newRevisingIds);
+    const allIds: string[] = [];
+    selectedGroups.forEach(baseTopic => {
+      resultGroups[baseTopic]?.forEach(r => allIds.push(r.id));
+    });
+    setRevisingIds(new Set(allIds));
 
-    for (const result of completedResults) {
-      const sourceImage = result.revisedImageBase64 || result.generatedImageBase64;
-      if (!sourceImage) continue;
+    for (const baseTopic of Array.from(selectedGroups)) {
+      const group = resultGroups[baseTopic];
+      if (!group || group.length === 0) continue;
 
+      // Step 1: Revise the FIRST image in the group
+      const primary = group[0];
+      const primarySource = primary.revisedImageBase64 || primary.generatedImageBase64;
+      if (!primarySource) continue;
+
+      let revisedPrimary: string | null = null;
       try {
-        const revised = await reviseGeneratedImage(sourceImage, bulkRevisionPrompt, null);
+        revisedPrimary = await reviseGeneratedImage(primarySource, bulkRevisionPrompt, null);
         setCurrentRun(prev => {
           if (!prev) return prev;
           return {
             ...prev,
             results: prev.results.map(r =>
-              r.id === result.id ? { ...r, revisedImageBase64: revised } : r
+              r.id === primary.id ? { ...r, revisedImageBase64: revisedPrimary! } : r
             ),
           };
         });
       } catch (err: any) {
-        console.error(`Revision failed for ${result.id}:`, err);
+        console.error(`Revision failed for primary ${primary.id}:`, err);
       }
 
-      setRevisingIds(prev => {
-        const next = new Set(prev);
-        next.delete(result.id);
-        return next;
-      });
+      setRevisingIds(prev => { const n = new Set(prev); n.delete(primary.id); return n; });
+
+      // Step 2: Revise siblings using the revised primary as REFERENCE
+      // This keeps language, style, and content consistent across sizes
+      for (let i = 1; i < group.length; i++) {
+        const sibling = group[i];
+        const siblingSource = sibling.revisedImageBase64 || sibling.generatedImageBase64;
+        if (!siblingSource) continue;
+
+        try {
+          const revisedSibling = await reviseGeneratedImage(
+            siblingSource,
+            `${bulkRevisionPrompt}. Bu görseli referans görseldeki değişikliklere uyumlu şekilde revize et. Aynı dil, aynı metin, aynı stil olmalı.`,
+            revisedPrimary // Pass revised primary as reference!
+          );
+          setCurrentRun(prev => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              results: prev.results.map(r =>
+                r.id === sibling.id ? { ...r, revisedImageBase64: revisedSibling } : r
+              ),
+            };
+          });
+        } catch (err: any) {
+          console.error(`Revision failed for sibling ${sibling.id}:`, err);
+        }
+
+        setRevisingIds(prev => { const n = new Set(prev); n.delete(sibling.id); return n; });
+      }
     }
 
     setIsRevising(false);
     setBulkRevisionPrompt('');
+    setSelectedGroups(new Set());
   };
 
   const handleSingleRevision = async (resultId: string) => {
     const prompt = singleRevisionPrompts[resultId];
     if (!currentRun || !prompt?.trim()) return;
 
+    // Find this result and its group siblings
     const result = currentRun.results.find(r => r.id === resultId);
-    const sourceImage = result?.revisedImageBase64 || result?.generatedImageBase64;
+    if (!result) return;
+    const baseTopic = getBaseTopic(result.topic);
+    const group = resultGroups[baseTopic] || [result];
+
+    // Mark all group members as revising
+    const groupIds = group.map(r => r.id);
+    setRevisingIds(prev => { const n = new Set(prev); groupIds.forEach(id => n.add(id)); return n; });
+
+    // Step 1: Revise the target image
+    const sourceImage = result.revisedImageBase64 || result.generatedImageBase64;
     if (!sourceImage) return;
 
-    setRevisingIds(prev => new Set(prev).add(resultId));
-
+    let revisedPrimary: string | null = null;
     try {
-      const revised = await reviseGeneratedImage(sourceImage, prompt, null);
+      revisedPrimary = await reviseGeneratedImage(sourceImage, prompt, null);
       setCurrentRun(prev => {
         if (!prev) return prev;
         return {
           ...prev,
           results: prev.results.map(r =>
-            r.id === resultId ? { ...r, revisedImageBase64: revised } : r
+            r.id === resultId ? { ...r, revisedImageBase64: revisedPrimary! } : r
           ),
         };
       });
-      setSingleRevisionPrompts(prev => ({ ...prev, [resultId]: '' }));
-      setExpandedRevision(null);
     } catch (err: any) {
       console.error(`Single revision failed:`, err);
       alert(`Revizyon hatası: ${err.message}`);
+      setRevisingIds(new Set());
+      return;
     }
 
-    setRevisingIds(prev => {
-      const next = new Set(prev);
-      next.delete(resultId);
-      return next;
-    });
+    setRevisingIds(prev => { const n = new Set(prev); n.delete(resultId); return n; });
+
+    // Step 2: Revise siblings with revised image as reference
+    const siblings = group.filter(r => r.id !== resultId);
+    for (const sibling of siblings) {
+      const sibSource = sibling.revisedImageBase64 || sibling.generatedImageBase64;
+      if (!sibSource) continue;
+
+      try {
+        const revisedSib = await reviseGeneratedImage(
+          sibSource,
+          `${prompt}. Bu görseli referans görseldeki değişikliklere uyumlu şekilde revize et. Aynı dil, aynı metin, aynı stil olmalı.`,
+          revisedPrimary
+        );
+        setCurrentRun(prev => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            results: prev.results.map(r =>
+              r.id === sibling.id ? { ...r, revisedImageBase64: revisedSib } : r
+            ),
+          };
+        });
+      } catch (err: any) {
+        console.error(`Sibling revision failed:`, err);
+      }
+
+      setRevisingIds(prev => { const n = new Set(prev); n.delete(sibling.id); return n; });
+    }
+
+    setSingleRevisionPrompts(prev => ({ ...prev, [resultId]: '' }));
+    setExpandedRevision(null);
   };
 
   const selectedBrand = brands.find(b => b.id === selectedBrandId);
@@ -816,164 +918,227 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
           {/* Results Grid */}
           {currentRun && currentRun.results.some(r => r.generatedImageBase64 || r.status !== 'pending') && (
             <div className="bg-lumina-900 border border-lumina-800 rounded-xl p-5">
-              <h3 className="text-white font-medium mb-4">Üretilen Görseller</h3>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-white font-medium">Üretilen Görseller</h3>
+                {Object.keys(resultGroups).length > 1 && currentRun.results.some(r => r.generatedImageBase64) && (
+                  <button
+                    onClick={selectAllGroups}
+                    className="text-[10px] text-slate-400 hover:text-white transition-colors"
+                  >
+                    {selectedGroups.size === Object.keys(resultGroups).filter(t => resultGroups[t].some(r => r.generatedImageBase64 || r.revisedImageBase64)).length
+                      ? 'Seçimi Kaldır' : 'Tümünü Seç'}
+                  </button>
+                )}
+              </div>
 
-              {/* ═══ BULK REVISION BAR ═══ */}
+              {/* ═══ REVISION BAR ═══ */}
               {currentRun.results.some(r => r.generatedImageBase64) && (
                 <div className="mb-4 p-3 bg-lumina-950 border border-lumina-800 rounded-xl">
                   <div className="flex items-center gap-2 mb-2">
                     <Edit2 size={14} className="text-lumina-gold shrink-0" />
-                    <p className="text-xs text-white font-medium">Toplu Revizyon — Tüm görselleri aynı anda düzenle</p>
+                    <p className="text-xs text-white font-medium">
+                      {selectedGroups.size > 0
+                        ? `Revizyon — ${selectedGroups.size} tasarım grubu seçili`
+                        : 'Revizyon — Aşağıdan tasarım gruplarını seçin'}
+                    </p>
                   </div>
                   <div className="flex gap-2">
                     <input
                       type="text"
                       value={bulkRevisionPrompt}
                       onChange={e => setBulkRevisionPrompt(e.target.value)}
-                      onKeyDown={e => e.key === 'Enter' && !isRevising && handleBulkRevision()}
+                      onKeyDown={e => e.key === 'Enter' && !isRevising && selectedGroups.size > 0 && handleGroupRevision()}
                       placeholder="Örn: Arka planı daha koyu yap, yazıları büyüt, logo'yu sağ alta taşı..."
                       className="flex-1 bg-lumina-900 border border-lumina-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-lumina-gold/50 placeholder-slate-600"
                       disabled={isRevising}
                     />
                     <button
-                      onClick={handleBulkRevision}
-                      disabled={isRevising || !bulkRevisionPrompt.trim()}
+                      onClick={handleGroupRevision}
+                      disabled={isRevising || !bulkRevisionPrompt.trim() || selectedGroups.size === 0}
                       className="px-4 py-2 rounded-lg text-xs font-bold bg-lumina-gold/20 text-lumina-gold border border-lumina-gold/30 hover:bg-lumina-gold/30 disabled:opacity-30 disabled:cursor-not-allowed transition-all flex items-center gap-1.5 shrink-0"
                     >
                       {isRevising ? (
                         <><Loader2 size={12} className="animate-spin" /> Revize ediliyor ({revisingIds.size} kaldı)...</>
                       ) : (
-                        <><RotateCcw size={12} /> Tümünü Revize Et</>
+                        <><RotateCcw size={12} /> Seçilenleri Revize Et</>
                       )}
                     </button>
                   </div>
-                  <p className="text-[10px] text-slate-600 mt-1.5">İsteğinizi basit bir dille anlatın. Tüm görseller (farklı boyutlar dahil) aynı talimatla revize edilecek.</p>
+                  <p className="text-[10px] text-slate-600 mt-1.5">
+                    İsteğinizi basit bir dille anlatın. Önce birinci boyut revize edilir, sonra diğer boyutlar revize edilen görsele göre uyumlu şekilde güncellenir.
+                  </p>
                 </div>
               )}
 
-              <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-                {currentRun.results.map((result) => {
-                  const displayImage = result.revisedImageBase64 || result.generatedImageBase64;
-                  const isThisRevising = revisingIds.has(result.id);
-                  const isExpanded = expandedRevision === result.id;
+              {/* ═══ GROUPED RESULTS ═══ */}
+              <div className="space-y-4">
+                {Object.entries(resultGroups).map(([baseTopic, group]) => {
+                  const hasImages = group.some(r => r.generatedImageBase64 || r.revisedImageBase64);
+                  const isGroupSelected = selectedGroups.has(baseTopic);
 
                   return (
-                    <div key={result.id} className="bg-lumina-950 border border-lumina-800 rounded-lg overflow-hidden">
-                      {/* Image */}
-                      <div className="aspect-square relative">
-                        {isThisRevising ? (
-                          <div className="w-full h-full flex items-center justify-center bg-lumina-900/50">
-                            {displayImage && (
-                              <img src={`data:image/png;base64,${displayImage}`} className="w-full h-full object-cover opacity-30 absolute inset-0" />
-                            )}
-                            <div className="text-center relative z-10">
-                              <Loader2 size={24} className="text-lumina-gold animate-spin mx-auto" />
-                              <p className="text-xs text-lumina-gold mt-2">Revize ediliyor...</p>
-                            </div>
-                          </div>
-                        ) : displayImage ? (
-                          <img
-                            src={`data:image/png;base64,${displayImage}`}
-                            className="w-full h-full object-cover"
-                            loading="lazy"
-                          />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center">
-                            {result.status === 'generating' || result.status === 'analyzing' || result.status === 'revising' ? (
-                              <div className="text-center">
-                                <Loader2 size={24} className="text-lumina-gold animate-spin mx-auto" />
-                                <p className="text-xs text-slate-500 mt-2">
-                                  {result.status === 'generating' ? 'Üretiliyor...' :
-                                   result.status === 'revising' ? 'Revize ediliyor...' :
-                                   'Analiz ediliyor...'}
-                                </p>
-                              </div>
-                            ) : result.status === 'failed' ? (
-                              <div className="text-center px-3">
-                                <XCircle size={24} className="text-red-400 mx-auto" />
-                                <p className="text-xs text-red-400 mt-2">{result.error || 'Hata'}</p>
-                              </div>
-                            ) : (
-                              <Clock size={24} className="text-slate-600" />
-                            )}
-                          </div>
+                    <div
+                      key={baseTopic}
+                      className={`border rounded-xl p-3 transition-all ${
+                        isGroupSelected
+                          ? 'border-lumina-gold/50 bg-lumina-gold/5'
+                          : 'border-lumina-800 bg-lumina-950'
+                      }`}
+                    >
+                      {/* Group header */}
+                      <div className="flex items-center gap-2 mb-2">
+                        {hasImages && (
+                          <button
+                            onClick={() => toggleGroup(baseTopic)}
+                            className={`w-4 h-4 rounded border flex items-center justify-center transition-all shrink-0 ${
+                              isGroupSelected
+                                ? 'bg-lumina-gold border-lumina-gold'
+                                : 'border-lumina-700 hover:border-lumina-500'
+                            }`}
+                          >
+                            {isGroupSelected && <Check size={10} className="text-lumina-950" />}
+                          </button>
                         )}
-
-                        {/* Revised badge */}
-                        {result.revisedImageBase64 && !isThisRevising && (
-                          <div className="absolute top-2 left-2 bg-lumina-gold/90 text-lumina-950 text-[9px] font-bold px-1.5 py-0.5 rounded">
-                            REVISED
-                          </div>
-                        )}
-
-                        {/* Action overlay */}
-                        {displayImage && !isThisRevising && (
-                          <div className="absolute inset-0 bg-black/60 opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                            <a
-                              href={`data:image/png;base64,${displayImage}`}
-                              download={`${result.topic.slice(0, 30)}${result.revisedImageBase64 ? '-revised' : ''}.png`}
-                              className="bg-white/20 backdrop-blur-sm text-white px-3 py-1.5 rounded-lg text-xs flex items-center gap-1"
-                            >
-                              <Download size={12} /> İndir
-                            </a>
-                            <button
-                              onClick={() => setExpandedRevision(isExpanded ? null : result.id)}
-                              className="bg-lumina-gold/30 backdrop-blur-sm text-lumina-gold px-3 py-1.5 rounded-lg text-xs flex items-center gap-1"
-                            >
-                              <Edit2 size={12} /> Revize
-                            </button>
-                          </div>
-                        )}
+                        <p className="text-xs text-white font-medium truncate" title={baseTopic}>{baseTopic}</p>
+                        <span className="text-[10px] text-slate-600 shrink-0">{group.length} boyut</span>
                       </div>
 
-                      {/* Single revision input */}
-                      {isExpanded && (
-                        <div className="p-2 bg-lumina-900 border-t border-lumina-800">
-                          <div className="flex gap-1.5">
-                            <input
-                              type="text"
-                              value={singleRevisionPrompts[result.id] || ''}
-                              onChange={e => setSingleRevisionPrompts(prev => ({ ...prev, [result.id]: e.target.value }))}
-                              onKeyDown={e => e.key === 'Enter' && handleSingleRevision(result.id)}
-                              placeholder="Bu görseli nasıl değiştireyim?"
-                              className="flex-1 bg-lumina-950 border border-lumina-800 rounded px-2 py-1.5 text-[11px] text-white focus:outline-none focus:border-lumina-gold/50 placeholder-slate-600"
-                              autoFocus
-                            />
-                            <button
-                              onClick={() => handleSingleRevision(result.id)}
-                              disabled={!singleRevisionPrompts[result.id]?.trim()}
-                              className="px-2 py-1.5 bg-lumina-gold/20 text-lumina-gold rounded text-[11px] hover:bg-lumina-gold/30 disabled:opacity-30 transition-all"
-                            >
-                              <Send size={10} />
-                            </button>
-                          </div>
-                        </div>
-                      )}
+                      {/* Images in this group */}
+                      <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
+                        {group.map((result) => {
+                          const displayImage = result.revisedImageBase64 || result.generatedImageBase64;
+                          const isThisRevising = revisingIds.has(result.id);
+                          const isExpanded = expandedRevision === result.id;
+                          const formatLabel = result.topic.match(/\[(.*?)\]/)?.[1];
 
-                      {/* Caption */}
-                      <div className="p-2">
-                        <p className="text-xs text-white truncate" title={result.topic}>{result.topic}</p>
-                        <div className="flex items-center justify-between mt-1">
-                          <div className="flex items-center gap-1">
-                            <span className={`inline-block w-1.5 h-1.5 rounded-full ${
-                              isThisRevising ? 'bg-lumina-gold animate-pulse' :
-                              result.status === 'completed' ? 'bg-emerald-400' :
-                              result.status === 'failed' ? 'bg-red-400' :
-                              result.status === 'pending' ? 'bg-slate-600' :
-                              'bg-blue-400 animate-pulse'
-                            }`} />
-                            <span className="text-[10px] text-slate-500">
-                              {isThisRevising ? 'Revize ediliyor...' :
-                               result.revisedImageBase64 ? 'Revize edildi' :
-                               result.status === 'completed' ? 'Tamamlandı' :
-                               result.status === 'failed' ? 'Başarısız' :
-                               result.status === 'generating' ? 'Üretiliyor' :
-                               result.status === 'revising' ? 'Denetleniyor' :
-                               result.status === 'analyzing' ? 'Analiz ediliyor' :
-                               'Bekliyor'}
-                            </span>
-                          </div>
-                        </div>
+                          return (
+                            <div key={result.id} className="bg-lumina-900 border border-lumina-800 rounded-lg overflow-hidden">
+                              {/* Image */}
+                              <div className="aspect-square relative">
+                                {isThisRevising ? (
+                                  <div className="w-full h-full flex items-center justify-center bg-lumina-900/50">
+                                    {displayImage && (
+                                      <img src={`data:image/png;base64,${displayImage}`} className="w-full h-full object-cover opacity-30 absolute inset-0" />
+                                    )}
+                                    <div className="text-center relative z-10">
+                                      <Loader2 size={24} className="text-lumina-gold animate-spin mx-auto" />
+                                      <p className="text-xs text-lumina-gold mt-2">Revize ediliyor...</p>
+                                    </div>
+                                  </div>
+                                ) : displayImage ? (
+                                  <img
+                                    src={`data:image/png;base64,${displayImage}`}
+                                    className="w-full h-full object-cover"
+                                    loading="lazy"
+                                  />
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center">
+                                    {result.status === 'generating' || result.status === 'analyzing' || result.status === 'revising' ? (
+                                      <div className="text-center">
+                                        <Loader2 size={24} className="text-lumina-gold animate-spin mx-auto" />
+                                        <p className="text-xs text-slate-500 mt-2">
+                                          {result.status === 'generating' ? 'Üretiliyor...' :
+                                           result.status === 'revising' ? 'Revize ediliyor...' :
+                                           'Analiz ediliyor...'}
+                                        </p>
+                                      </div>
+                                    ) : result.status === 'failed' ? (
+                                      <div className="text-center px-3">
+                                        <XCircle size={24} className="text-red-400 mx-auto" />
+                                        <p className="text-xs text-red-400 mt-2">{result.error || 'Hata'}</p>
+                                      </div>
+                                    ) : (
+                                      <Clock size={24} className="text-slate-600" />
+                                    )}
+                                  </div>
+                                )}
+
+                                {/* Format label */}
+                                {formatLabel && (
+                                  <div className="absolute top-2 right-2 bg-black/60 backdrop-blur-sm text-white text-[9px] font-medium px-1.5 py-0.5 rounded">
+                                    {formatLabel}
+                                  </div>
+                                )}
+
+                                {/* Revised badge */}
+                                {result.revisedImageBase64 && !isThisRevising && (
+                                  <div className="absolute top-2 left-2 bg-lumina-gold/90 text-lumina-950 text-[9px] font-bold px-1.5 py-0.5 rounded">
+                                    REVISED
+                                  </div>
+                                )}
+
+                                {/* Action overlay */}
+                                {displayImage && !isThisRevising && (
+                                  <div className="absolute inset-0 bg-black/60 opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                                    <a
+                                      href={`data:image/png;base64,${displayImage}`}
+                                      download={`${result.topic.slice(0, 30)}${result.revisedImageBase64 ? '-revised' : ''}.png`}
+                                      className="bg-white/20 backdrop-blur-sm text-white px-3 py-1.5 rounded-lg text-xs flex items-center gap-1"
+                                    >
+                                      <Download size={12} /> İndir
+                                    </a>
+                                    <button
+                                      onClick={() => setExpandedRevision(isExpanded ? null : result.id)}
+                                      className="bg-lumina-gold/30 backdrop-blur-sm text-lumina-gold px-3 py-1.5 rounded-lg text-xs flex items-center gap-1"
+                                    >
+                                      <Edit2 size={12} /> Revize
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Single revision input — revises this + siblings */}
+                              {isExpanded && (
+                                <div className="p-2 bg-lumina-950 border-t border-lumina-800">
+                                  <div className="flex gap-1.5">
+                                    <input
+                                      type="text"
+                                      value={singleRevisionPrompts[result.id] || ''}
+                                      onChange={e => setSingleRevisionPrompts(prev => ({ ...prev, [result.id]: e.target.value }))}
+                                      onKeyDown={e => e.key === 'Enter' && handleSingleRevision(result.id)}
+                                      placeholder="Nasıl değişsin? (diğer boyutlar da uyumlu güncellenir)"
+                                      className="flex-1 bg-lumina-900 border border-lumina-800 rounded px-2 py-1.5 text-[11px] text-white focus:outline-none focus:border-lumina-gold/50 placeholder-slate-600"
+                                      autoFocus
+                                    />
+                                    <button
+                                      onClick={() => handleSingleRevision(result.id)}
+                                      disabled={!singleRevisionPrompts[result.id]?.trim()}
+                                      className="px-2 py-1.5 bg-lumina-gold/20 text-lumina-gold rounded text-[11px] hover:bg-lumina-gold/30 disabled:opacity-30 transition-all"
+                                    >
+                                      <Send size={10} />
+                                    </button>
+                                  </div>
+                                  {group.length > 1 && (
+                                    <p className="text-[9px] text-slate-600 mt-1">Bu boyut revize edilecek, diğer {group.length - 1} boyut da otomatik uyumlanacak</p>
+                                  )}
+                                </div>
+                              )}
+
+                              {/* Caption */}
+                              <div className="p-2">
+                                <div className="flex items-center gap-1">
+                                  <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${
+                                    isThisRevising ? 'bg-lumina-gold animate-pulse' :
+                                    result.status === 'completed' ? 'bg-emerald-400' :
+                                    result.status === 'failed' ? 'bg-red-400' :
+                                    result.status === 'pending' ? 'bg-slate-600' :
+                                    'bg-blue-400 animate-pulse'
+                                  }`} />
+                                  <span className="text-[10px] text-slate-500">
+                                    {isThisRevising ? 'Revize ediliyor...' :
+                                     result.revisedImageBase64 ? 'Revize edildi' :
+                                     result.status === 'completed' ? 'Tamamlandı' :
+                                     result.status === 'failed' ? 'Başarısız' :
+                                     result.status === 'generating' ? 'Üretiliyor' :
+                                     result.status === 'revising' ? 'Denetleniyor' :
+                                     result.status === 'analyzing' ? 'Analiz ediliyor' :
+                                     'Bekliyor'}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   );
