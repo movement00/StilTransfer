@@ -319,7 +319,7 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
   const canStart = selectedBrandId && topics.length > 0 && referenceImages.length > 0 && !isRunning;
 
   return (
-    <div className="p-6 h-screen overflow-y-auto">
+    <div className="p-4 lg:p-6 h-screen overflow-y-auto">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
@@ -351,9 +351,9 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
         </div>
       </div>
 
-      <div className="grid grid-cols-12 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-6">
         {/* LEFT: Configuration Panel */}
-        <div className="col-span-4 space-y-4">
+        <div className="lg:col-span-4 space-y-4">
           <div className="bg-lumina-900 border border-lumina-800 rounded-xl p-5">
             <h3 className="text-white font-medium flex items-center gap-2 mb-4">
               <Settings2 size={18} className="text-lumina-gold" />
@@ -398,7 +398,7 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
 
             {/* Aspect Ratio */}
             <label className="block text-xs text-slate-400 mb-1">En-Boy Oranı</label>
-            <div className="grid grid-cols-4 gap-2 mb-3">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 mb-3">
               {ASPECT_RATIOS.map(ar => (
                 <button
                   key={ar.value}
@@ -607,7 +607,7 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
         </div>
 
         {/* RIGHT: Execution Panel */}
-        <div className="col-span-8 space-y-4">
+        <div className="lg:col-span-8 space-y-4">
           {/* Step Progress */}
           {currentRun && (
             <div className="bg-lumina-900 border border-lumina-800 rounded-xl p-5">
@@ -683,7 +683,7 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
           {currentRun && currentRun.results.some(r => r.generatedImageBase64 || r.status !== 'pending') && (
             <div className="bg-lumina-900 border border-lumina-800 rounded-xl p-5">
               <h3 className="text-white font-medium mb-4">Üretilen Görseller</h3>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
                 {currentRun.results.map((result) => (
                   <div key={result.id} className="bg-lumina-950 border border-lumina-800 rounded-lg overflow-hidden">
                     {/* Image */}
@@ -809,7 +809,7 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
       {/* ═══ Scout Picker Modal ═══ */}
       {showScoutPicker && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-6">
-          <div className="bg-lumina-900 border border-lumina-800 rounded-2xl w-full max-w-4xl max-h-[85vh] flex flex-col overflow-hidden">
+          <div className="bg-lumina-900 border border-lumina-800 rounded-2xl w-full max-w-4xl max-h-[90vh] lg:max-h-[85vh] flex flex-col overflow-hidden mx-2">
             {/* Modal Header */}
             <div className="flex items-center justify-between p-5 border-b border-lumina-800">
               <div className="flex items-center gap-3">
@@ -873,7 +873,7 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
                   {isScoring && <p className="text-xs text-indigo-400 mt-1">AI kalite puanlaması yapılıyor...</p>}
                 </div>
               ) : scoutResults.length > 0 ? (
-                <div className="grid grid-cols-4 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
                   {scoutResults.map(result => {
                     const isSelected = scoutSelected.has(result.id);
                     const scoreData = scoredResults.get(result.id);

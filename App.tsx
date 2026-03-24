@@ -223,9 +223,9 @@ function App() {
     switch (currentView) {
       case 'dashboard':
         return (
-          <div className="p-8">
-            <h2 className="text-3xl font-serif text-white mb-6">Panel</h2>
-            <div className="grid grid-cols-3 gap-6 mb-8">
+          <div className="p-4 lg:p-8">
+            <h2 className="text-2xl lg:text-3xl font-serif text-white mb-6">Panel</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 lg:gap-6 mb-8">
                <div className="bg-lumina-900 border border-lumina-800 p-6 rounded-xl">
                   <h3 className="text-slate-400 text-sm uppercase tracking-wider">Yönetilen Markalar</h3>
                   <p className="text-4xl text-white font-serif mt-2">{brands.length}</p>
@@ -241,7 +241,7 @@ function App() {
             </div>
             <h3 className="text-xl text-white mb-4">Son Üretimler (Son 10)</h3>
             {history.length > 0 ? (
-              <div className="grid grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                 {history.slice(0, 4).map(h => (
                   <div key={h.id} className="aspect-square rounded-lg overflow-hidden border border-lumina-800 group relative">
                     <img src={`data:image/png;base64,${h.url}`} className="w-full h-full object-cover" loading="lazy" />
@@ -309,7 +309,7 @@ function App() {
   return (
     <div className="flex min-h-screen bg-lumina-950 text-slate-200 selection:bg-lumina-gold selection:text-black">
       <Sidebar currentView={currentView} setView={setCurrentView} onApiKeyClick={() => { setApiKeyInput(getApiKey()); setShowApiKeyModal(true); }} />
-      <main className="ml-64 w-full h-screen overflow-y-auto">
+      <main className="w-full pt-14 lg:pt-0 lg:ml-64 h-screen overflow-y-auto">
         {renderContent()}
       </main>
 
