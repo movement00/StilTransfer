@@ -378,7 +378,7 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
   // ═══ GROUP RESULTS BY BASE TOPIC ═══
   const getBaseTopic = (topic: string) => topic.replace(/\s*\[.*?\]\s*$/, '');
 
-  const resultGroups = currentRun ? (() => {
+  const resultGroups: Record<string, PipelineResult[]> = currentRun ? (() => {
     const groups: Record<string, PipelineResult[]> = {};
     currentRun.results.forEach(r => {
       const base = getBaseTopic(r.topic);
@@ -418,8 +418,8 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
     });
     setRevisingIds(new Set(allIds));
 
-    for (const baseTopic of Array.from(selectedGroups)) {
-      const group = resultGroups[baseTopic];
+    for (const baseTopic of [...selectedGroups]) {
+      const group = resultGroups[baseTopic as string];
       if (!group || group.length === 0) continue;
 
       // Step 1: Revise the FIRST image in the group
