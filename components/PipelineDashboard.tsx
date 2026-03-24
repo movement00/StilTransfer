@@ -3,14 +3,14 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Play, Square, RotateCcw, ChevronRight, CheckCircle2, XCircle,
   Loader2, Clock, Image, Upload, Trash2, Plus, Download, SkipForward,
-  Zap, ArrowRight, Settings2, FileText, Sparkles, Compass, Search, X, Check, Star
+  Zap, ArrowRight, Settings2, FileText, Sparkles, Compass, Search, X, Check, Star, Edit2, Send
 } from 'lucide-react';
 import {
   Brand, PipelineConfig, PipelineRun, PipelineStep, PipelineResult,
   PipelineImage, PipelineStepStatus, SavedTemplate, GeneratedAsset, TemplateFolder, ScoutResult
 } from '../types';
 import { pipelineService } from '../services/pipelineService';
-import { resizeImageToRawBase64, generatePipelineTopics } from '../services/geminiService';
+import { resizeImageToRawBase64, generatePipelineTopics, reviseGeneratedImage } from '../services/geminiService';
 import { searchInspiration, downloadImage, scoreAndRankResults } from '../services/scoutService';
 
 interface PipelineDashboardProps {
@@ -58,6 +58,13 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
   const [revisionPrompt, setRevisionPrompt] = useState('');
   const [saveAsTemplate, setSaveAsTemplate] = useState(true);
   const [pipelineName, setPipelineName] = useState('');
+
+  // Revision state
+  const [bulkRevisionPrompt, setBulkRevisionPrompt] = useState('');
+  const [isRevising, setIsRevising] = useState(false);
+  const [revisingIds, setRevisingIds] = useState<Set<string>>(new Set());
+  const [singleRevisionPrompts, setSingleRevisionPrompts] = useState<Record<string, string>>({});
+  const [expandedRevision, setExpandedRevision] = useState<string | null>(null);
 
   // AI Topics state
   const [isGeneratingTopics, setIsGeneratingTopics] = useState(false);
@@ -362,6 +369,81 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
         link.download = `pipeline-${i + 1}-${r.topic.slice(0, 30)}.png`;
         link.click();
       }
+    });
+  };
+
+  // ═══ REVISION HANDLERS ═══
+  const handleBulkRevision = async () => {
+    if (!currentRun || !bulkRevisionPrompt.trim()) return;
+    const completedResults = currentRun.results.filter(r => r.generatedImageBase64 || r.revisedImageBase64);
+    if (completedResults.length === 0) return;
+
+    setIsRevising(true);
+    const newRevisingIds = new Set(completedResults.map(r => r.id));
+    setRevisingIds(newRevisingIds);
+
+    for (const result of completedResults) {
+      const sourceImage = result.revisedImageBase64 || result.generatedImageBase64;
+      if (!sourceImage) continue;
+
+      try {
+        const revised = await reviseGeneratedImage(sourceImage, bulkRevisionPrompt, null);
+        setCurrentRun(prev => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            results: prev.results.map(r =>
+              r.id === result.id ? { ...r, revisedImageBase64: revised } : r
+            ),
+          };
+        });
+      } catch (err: any) {
+        console.error(`Revision failed for ${result.id}:`, err);
+      }
+
+      setRevisingIds(prev => {
+        const next = new Set(prev);
+        next.delete(result.id);
+        return next;
+      });
+    }
+
+    setIsRevising(false);
+    setBulkRevisionPrompt('');
+  };
+
+  const handleSingleRevision = async (resultId: string) => {
+    const prompt = singleRevisionPrompts[resultId];
+    if (!currentRun || !prompt?.trim()) return;
+
+    const result = currentRun.results.find(r => r.id === resultId);
+    const sourceImage = result?.revisedImageBase64 || result?.generatedImageBase64;
+    if (!sourceImage) return;
+
+    setRevisingIds(prev => new Set(prev).add(resultId));
+
+    try {
+      const revised = await reviseGeneratedImage(sourceImage, prompt, null);
+      setCurrentRun(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          results: prev.results.map(r =>
+            r.id === resultId ? { ...r, revisedImageBase64: revised } : r
+          ),
+        };
+      });
+      setSingleRevisionPrompts(prev => ({ ...prev, [resultId]: '' }));
+      setExpandedRevision(null);
+    } catch (err: any) {
+      console.error(`Single revision failed:`, err);
+      alert(`Revizyon hatası: ${err.message}`);
+    }
+
+    setRevisingIds(prev => {
+      const next = new Set(prev);
+      next.delete(resultId);
+      return next;
     });
   };
 
@@ -735,78 +817,167 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
           {currentRun && currentRun.results.some(r => r.generatedImageBase64 || r.status !== 'pending') && (
             <div className="bg-lumina-900 border border-lumina-800 rounded-xl p-5">
               <h3 className="text-white font-medium mb-4">Üretilen Görseller</h3>
-              <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-                {currentRun.results.map((result) => (
-                  <div key={result.id} className="bg-lumina-950 border border-lumina-800 rounded-lg overflow-hidden">
-                    {/* Image */}
-                    <div className="aspect-square relative">
-                      {(result.generatedImageBase64) ? (
-                        <img
-                          src={`data:image/png;base64,${result.generatedImageBase64}`}
-                          className="w-full h-full object-cover"
-                          loading="lazy"
-                        />
+
+              {/* ═══ BULK REVISION BAR ═══ */}
+              {currentRun.results.some(r => r.generatedImageBase64) && (
+                <div className="mb-4 p-3 bg-lumina-950 border border-lumina-800 rounded-xl">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Edit2 size={14} className="text-lumina-gold shrink-0" />
+                    <p className="text-xs text-white font-medium">Toplu Revizyon — Tüm görselleri aynı anda düzenle</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={bulkRevisionPrompt}
+                      onChange={e => setBulkRevisionPrompt(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && !isRevising && handleBulkRevision()}
+                      placeholder="Örn: Arka planı daha koyu yap, yazıları büyüt, logo'yu sağ alta taşı..."
+                      className="flex-1 bg-lumina-900 border border-lumina-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-lumina-gold/50 placeholder-slate-600"
+                      disabled={isRevising}
+                    />
+                    <button
+                      onClick={handleBulkRevision}
+                      disabled={isRevising || !bulkRevisionPrompt.trim()}
+                      className="px-4 py-2 rounded-lg text-xs font-bold bg-lumina-gold/20 text-lumina-gold border border-lumina-gold/30 hover:bg-lumina-gold/30 disabled:opacity-30 disabled:cursor-not-allowed transition-all flex items-center gap-1.5 shrink-0"
+                    >
+                      {isRevising ? (
+                        <><Loader2 size={12} className="animate-spin" /> Revize ediliyor ({revisingIds.size} kaldı)...</>
                       ) : (
-                        <div className="w-full h-full flex items-center justify-center">
-                          {result.status === 'generating' || result.status === 'analyzing' || result.status === 'revising' ? (
-                            <div className="text-center">
+                        <><RotateCcw size={12} /> Tümünü Revize Et</>
+                      )}
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-slate-600 mt-1.5">İsteğinizi basit bir dille anlatın. Tüm görseller (farklı boyutlar dahil) aynı talimatla revize edilecek.</p>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+                {currentRun.results.map((result) => {
+                  const displayImage = result.revisedImageBase64 || result.generatedImageBase64;
+                  const isThisRevising = revisingIds.has(result.id);
+                  const isExpanded = expandedRevision === result.id;
+
+                  return (
+                    <div key={result.id} className="bg-lumina-950 border border-lumina-800 rounded-lg overflow-hidden">
+                      {/* Image */}
+                      <div className="aspect-square relative">
+                        {isThisRevising ? (
+                          <div className="w-full h-full flex items-center justify-center bg-lumina-900/50">
+                            {displayImage && (
+                              <img src={`data:image/png;base64,${displayImage}`} className="w-full h-full object-cover opacity-30 absolute inset-0" />
+                            )}
+                            <div className="text-center relative z-10">
                               <Loader2 size={24} className="text-lumina-gold animate-spin mx-auto" />
-                              <p className="text-xs text-slate-500 mt-2">
-                                {result.status === 'generating' ? 'Üretiliyor...' :
-                                 result.status === 'revising' ? 'Revize ediliyor...' :
-                                 'Analiz ediliyor...'}
-                              </p>
+                              <p className="text-xs text-lumina-gold mt-2">Revize ediliyor...</p>
                             </div>
-                          ) : result.status === 'failed' ? (
-                            <div className="text-center px-3">
-                              <XCircle size={24} className="text-red-400 mx-auto" />
-                              <p className="text-xs text-red-400 mt-2">{result.error || 'Hata'}</p>
-                            </div>
-                          ) : (
-                            <Clock size={24} className="text-slate-600" />
-                          )}
+                          </div>
+                        ) : displayImage ? (
+                          <img
+                            src={`data:image/png;base64,${displayImage}`}
+                            className="w-full h-full object-cover"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center">
+                            {result.status === 'generating' || result.status === 'analyzing' || result.status === 'revising' ? (
+                              <div className="text-center">
+                                <Loader2 size={24} className="text-lumina-gold animate-spin mx-auto" />
+                                <p className="text-xs text-slate-500 mt-2">
+                                  {result.status === 'generating' ? 'Üretiliyor...' :
+                                   result.status === 'revising' ? 'Revize ediliyor...' :
+                                   'Analiz ediliyor...'}
+                                </p>
+                              </div>
+                            ) : result.status === 'failed' ? (
+                              <div className="text-center px-3">
+                                <XCircle size={24} className="text-red-400 mx-auto" />
+                                <p className="text-xs text-red-400 mt-2">{result.error || 'Hata'}</p>
+                              </div>
+                            ) : (
+                              <Clock size={24} className="text-slate-600" />
+                            )}
+                          </div>
+                        )}
+
+                        {/* Revised badge */}
+                        {result.revisedImageBase64 && !isThisRevising && (
+                          <div className="absolute top-2 left-2 bg-lumina-gold/90 text-lumina-950 text-[9px] font-bold px-1.5 py-0.5 rounded">
+                            REVISED
+                          </div>
+                        )}
+
+                        {/* Action overlay */}
+                        {displayImage && !isThisRevising && (
+                          <div className="absolute inset-0 bg-black/60 opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                            <a
+                              href={`data:image/png;base64,${displayImage}`}
+                              download={`${result.topic.slice(0, 30)}${result.revisedImageBase64 ? '-revised' : ''}.png`}
+                              className="bg-white/20 backdrop-blur-sm text-white px-3 py-1.5 rounded-lg text-xs flex items-center gap-1"
+                            >
+                              <Download size={12} /> İndir
+                            </a>
+                            <button
+                              onClick={() => setExpandedRevision(isExpanded ? null : result.id)}
+                              className="bg-lumina-gold/30 backdrop-blur-sm text-lumina-gold px-3 py-1.5 rounded-lg text-xs flex items-center gap-1"
+                            >
+                              <Edit2 size={12} /> Revize
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Single revision input */}
+                      {isExpanded && (
+                        <div className="p-2 bg-lumina-900 border-t border-lumina-800">
+                          <div className="flex gap-1.5">
+                            <input
+                              type="text"
+                              value={singleRevisionPrompts[result.id] || ''}
+                              onChange={e => setSingleRevisionPrompts(prev => ({ ...prev, [result.id]: e.target.value }))}
+                              onKeyDown={e => e.key === 'Enter' && handleSingleRevision(result.id)}
+                              placeholder="Bu görseli nasıl değiştireyim?"
+                              className="flex-1 bg-lumina-950 border border-lumina-800 rounded px-2 py-1.5 text-[11px] text-white focus:outline-none focus:border-lumina-gold/50 placeholder-slate-600"
+                              autoFocus
+                            />
+                            <button
+                              onClick={() => handleSingleRevision(result.id)}
+                              disabled={!singleRevisionPrompts[result.id]?.trim()}
+                              className="px-2 py-1.5 bg-lumina-gold/20 text-lumina-gold rounded text-[11px] hover:bg-lumina-gold/30 disabled:opacity-30 transition-all"
+                            >
+                              <Send size={10} />
+                            </button>
+                          </div>
                         </div>
                       )}
 
-
-                      {/* Download overlay */}
-                      {(result.generatedImageBase64) && (
-                        <div className="absolute inset-0 bg-black/50 opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center">
-                          <a
-                            href={`data:image/png;base64,${result.generatedImageBase64}`}
-                            download={`${result.topic.slice(0, 30)}.png`}
-                            className="bg-white/20 backdrop-blur-sm text-white px-3 py-1.5 rounded-lg text-xs flex items-center gap-1"
-                          >
-                            <Download size={12} /> İndir
-                          </a>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Caption */}
-                    <div className="p-2">
-                      <p className="text-xs text-white truncate" title={result.topic}>{result.topic}</p>
-                      <div className="flex items-center justify-between mt-1">
-                        <div className="flex items-center gap-1">
-                          <span className={`inline-block w-1.5 h-1.5 rounded-full ${
-                            result.status === 'completed' ? 'bg-emerald-400' :
-                            result.status === 'failed' ? 'bg-red-400' :
-                            result.status === 'pending' ? 'bg-slate-600' :
-                            'bg-blue-400 animate-pulse'
-                          }`} />
-                          <span className="text-[10px] text-slate-500">
-                            {result.status === 'completed' ? 'Tamamlandı' :
-                             result.status === 'failed' ? 'Başarısız' :
-                             result.status === 'generating' ? 'Üretiliyor' :
-                             result.status === 'revising' ? 'Denetleniyor' :
-                             result.status === 'analyzing' ? 'Analiz ediliyor' :
-                             'Bekliyor'}
-                          </span>
+                      {/* Caption */}
+                      <div className="p-2">
+                        <p className="text-xs text-white truncate" title={result.topic}>{result.topic}</p>
+                        <div className="flex items-center justify-between mt-1">
+                          <div className="flex items-center gap-1">
+                            <span className={`inline-block w-1.5 h-1.5 rounded-full ${
+                              isThisRevising ? 'bg-lumina-gold animate-pulse' :
+                              result.status === 'completed' ? 'bg-emerald-400' :
+                              result.status === 'failed' ? 'bg-red-400' :
+                              result.status === 'pending' ? 'bg-slate-600' :
+                              'bg-blue-400 animate-pulse'
+                            }`} />
+                            <span className="text-[10px] text-slate-500">
+                              {isThisRevising ? 'Revize ediliyor...' :
+                               result.revisedImageBase64 ? 'Revize edildi' :
+                               result.status === 'completed' ? 'Tamamlandı' :
+                               result.status === 'failed' ? 'Başarısız' :
+                               result.status === 'generating' ? 'Üretiliyor' :
+                               result.status === 'revising' ? 'Denetleniyor' :
+                               result.status === 'analyzing' ? 'Analiz ediliyor' :
+                               'Bekliyor'}
+                            </span>
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
