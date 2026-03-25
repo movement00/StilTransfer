@@ -492,69 +492,33 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
     if (!currentRun || !prompt?.trim()) return;
     const brand = brands.find(b => b.id === selectedBrandId);
 
-    // Find this result and its group siblings
     const result = currentRun.results.find(r => r.id === resultId);
     if (!result) return;
-    const baseTopic = getBaseTopic(result.topic);
-    const group = resultGroups[baseTopic] || [result];
     const resultAspectRatio = getAspectRatio(result.topic);
 
-    // Mark all group members as revising
-    const groupIds = group.map(r => r.id);
-    setRevisingIds(prev => { const n = new Set(prev); groupIds.forEach(id => n.add(id)); return n; });
+    // Only mark this single image as revising
+    setRevisingIds(new Set([resultId]));
 
-    // Step 1: Revise the target image
     const sourceImage = result.revisedImageBase64 || result.generatedImageBase64;
     if (!sourceImage) return;
 
-    let revisedPrimary: string | null = null;
     try {
-      revisedPrimary = await reviseGeneratedImage(sourceImage, prompt, null, resultAspectRatio, brand?.logo);
+      const revised = await reviseGeneratedImage(sourceImage, prompt, null, resultAspectRatio, brand?.logo);
       setCurrentRun(prev => {
         if (!prev) return prev;
         return {
           ...prev,
           results: prev.results.map(r =>
-            r.id === resultId ? { ...r, revisedImageBase64: revisedPrimary! } : r
+            r.id === resultId ? { ...r, revisedImageBase64: revised } : r
           ),
         };
       });
     } catch (err: any) {
       console.error(`Single revision failed:`, err);
       alert(`Revizyon hatası: ${err.message}`);
-      setRevisingIds(new Set());
-      return;
     }
 
-    setRevisingIds(prev => { const n = new Set(prev); n.delete(resultId); return n; });
-
-    // Step 2: Adapt revised image to sibling formats (same design, different size)
-    const siblings = group.filter(r => r.id !== resultId);
-    for (const sibling of siblings) {
-      const siblingAspectRatio = getAspectRatio(sibling.topic);
-
-      try {
-        const adaptedSib = await adaptRevisedToFormat(
-          revisedPrimary,
-          siblingAspectRatio || '9:16',
-          resultAspectRatio || '1:1',
-          brand?.logo
-        );
-        setCurrentRun(prev => {
-          if (!prev) return prev;
-          return {
-            ...prev,
-            results: prev.results.map(r =>
-              r.id === sibling.id ? { ...r, revisedImageBase64: adaptedSib } : r
-            ),
-          };
-        });
-      } catch (err: any) {
-        console.error(`Sibling adapt failed:`, err);
-      }
-
-      setRevisingIds(prev => { const n = new Set(prev); n.delete(sibling.id); return n; });
-    }
+    setRevisingIds(new Set());
 
     setSingleRevisionPrompts(prev => ({ ...prev, [resultId]: '' }));
     setExpandedRevision(null);
