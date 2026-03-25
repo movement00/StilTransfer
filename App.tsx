@@ -22,6 +22,7 @@ const INITIAL_BRANDS: Brand[] = [
     primaryColor: '#F8BE00',
     secondaryColor: '#201C1D',
     tone: 'Yenilikçi, Global, Teknolojik, Hızlı, Kullanıcı Dostu',
+    outputLanguage: 'en',
     palette: [
       { name: 'Brand Yellow', hex: '#F8BE00' },
       { name: 'Brand Black', hex: '#201C1D' },

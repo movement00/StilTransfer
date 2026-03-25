@@ -59,6 +59,7 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
   const [revisionPrompt, setRevisionPrompt] = useState('');
   const [saveAsTemplate, setSaveAsTemplate] = useState(true);
   const [pipelineName, setPipelineName] = useState('');
+  const [creativeTone, setCreativeTone] = useState('kurumsal');
 
   // Revision state
   const [bulkRevisionPrompt, setBulkRevisionPrompt] = useState('');
@@ -194,7 +195,7 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
       const refs = referenceImages.length > 0
         ? referenceImages.map(img => ({ base64: img.base64, name: img.name }))
         : undefined;
-      const generated = await generatePipelineTopics(brand, topicCount, aspectRatio, refs);
+      const generated = await generatePipelineTopics(brand, topicCount, aspectRatio, refs, creativeTone);
       if (generated.length > 0) {
         setTopicsText(generated.join('\n'));
       } else {
@@ -345,6 +346,7 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
       autoRevise: true, // Kreatif Beyin always active
       revisionPrompt: undefined,
       saveAsTemplate,
+      creativeTone,
       createdAt: Date.now(),
     };
 
@@ -774,15 +776,38 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
             />
 
             {/* AI Creative Brain Info */}
+            {/* Kreatif Beyin — Yaklaşım Seçici */}
             <div className="mt-4 p-3 bg-indigo-500/10 rounded-lg border border-indigo-500/20">
-              <div className="flex items-center gap-2 mb-1.5">
+              <div className="flex items-center gap-2 mb-2">
                 <span className="text-sm">🧠</span>
-                <p className="text-sm text-indigo-300 font-medium">Kreatif Beyin — Her Zaman Aktif</p>
+                <p className="text-sm text-indigo-300 font-medium">Kreatif Beyin — Yaklaşım Seçimi</p>
               </div>
-              <p className="text-xs text-indigo-300/70 leading-relaxed">
-                Her konu için otomatik olarak: Kreatif Direktör tasarım direktifleri (tipografi, renk 60-30-10,
-                kompozisyon, hiyerarşi) + AI Metin Yazarı içerik planı (her katman için akıllı metin,
-                başlık, alt başlık, CTA). Tüm bilgiler doğrudan üretime enjekte edilir.
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 mb-2">
+                {[
+                  { id: 'kurumsal', label: 'Kurumsal', desc: 'Profesyonel, güven veren' },
+                  { id: 'esprili', label: 'Esprili', desc: 'Şakacı, zekice, mizahi' },
+                  { id: 'eglenceli', label: 'Eğlenceli', desc: 'Enerjik, canlı, neşeli' },
+                  { id: 'samimi', label: 'Samimi', desc: 'Sıcak, arkadaşça, içten' },
+                  { id: 'luks', label: 'Lüks / Premium', desc: 'Sofistike, zarif, seçkin' },
+                  { id: 'genc', label: 'Genç / Dinamik', desc: 'Trend, cesur, enerjik' },
+                ].map(tone => (
+                  <button
+                    key={tone.id}
+                    onClick={() => setCreativeTone(tone.id)}
+                    disabled={isRunning}
+                    className={`p-2 rounded-lg text-left transition-all border ${
+                      creativeTone === tone.id
+                        ? 'bg-indigo-500/20 border-indigo-400/50 text-indigo-200'
+                        : 'bg-lumina-950/50 border-lumina-800/50 text-slate-400 hover:border-lumina-700'
+                    }`}
+                  >
+                    <span className="text-xs font-medium block">{tone.label}</span>
+                    <span className="text-[10px] opacity-60">{tone.desc}</span>
+                  </button>
+                ))}
+              </div>
+              <p className="text-[10px] text-indigo-300/50 leading-relaxed">
+                Seçilen yaklaşım; metin içerikleri, direktifler ve tüm kreatif çıktıları etkiler.
               </p>
             </div>
 

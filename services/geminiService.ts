@@ -450,6 +450,7 @@ export const reconstructFromBlueprint = async (
        - Yukarıdaki "METİN İÇERİKLERİ" bölümündeki metinleri KELİMESİ KELİMESİNE yaz
        - Font boyutu, ağırlığı ve stili blueprint'teki gibi
        - Metinler OKUNAKLI ve NET olmalı — bulanık veya bozuk metin YASAK
+       - DİL: Tüm metinler ${brand.outputLanguage === 'en' ? 'İNGİLİZCE' : 'TÜRKÇE'} olmalı
 
     3. RENKLER:
        - Referans görselin orijinal renklerini KULLANMA
@@ -708,7 +709,8 @@ export const generateContentPlan = async (
   blueprint: DesignBlueprint,
   brand: Brand,
   topic: string,
-  directives: DesignDirectives
+  directives: DesignDirectives,
+  creativeTone?: string
 ): Promise<ContentPlan> => {
   const ai = getAI();
 
@@ -754,10 +756,11 @@ export const generateContentPlan = async (
     3. KARAKTER SINIRI: Her katmanın tahmini maksimum karakter sayısını aşma
        - Çok uzun metinler tasarımı bozar
        - Başlıklar kısa ve vurucu olsun
-    4. DİL: Markanın tonuna uygun Türkçe veya İngilizce (orijinal diline göre)
+    4. DİL: ${brand.outputLanguage === 'en' ? 'İNGİLİZCE — tüm metinler İngilizce olmalı' : 'TÜRKÇE — tüm metinler Türkçe olmalı'}
     5. LOGO katmanı varsa: Marka adını "${brand.name}" olarak yaz
     6. Klişe ifadelerden kaçın — özgün, akılda kalıcı olsun
     7. Sektöre özgü terminoloji kullan (${brand.industry})
+    ${creativeTone ? `8. KREATİF YAKLAŞIM: ${creativeTone === 'kurumsal' ? 'KURUMSAL — profesyonel, güven veren dil. Resmi ama sıcak. Net ve doğrudan mesajlar.' : creativeTone === 'esprili' ? 'ESPRİLİ — şakacı, zekice mizah. Kelime oyunları, çift anlamlı ifadeler, gülümseten metinler.' : creativeTone === 'eglenceli' ? 'EĞLENCELİ — enerjik, neşeli, coşkulu. Dinamik ifadeler, ünlemler, heyecan verici dil.' : creativeTone === 'samimi' ? 'SAMİMİ — sıcak, arkadaşça, içten. "Sen" hitabı, konuşma dili, empati kuran ifadeler.' : creativeTone === 'luks' ? 'LÜX/PREMİUM — sofistike, zarif, seçkin. Minimal kelime, güçlü anlam. Az söz, çok etki.' : creativeTone === 'genc' ? 'GENÇ/DİNAMİK — trend dili, cesur ifadeler, kısa ve vurucu. Sosyal medya jargonu.' : creativeTone}. TÜM METİNLER bu yaklaşıma uygun yazılmalı.` : ''}
 
     Ayrıca genel bir headline, subheadline, ctaText ve brandMessage üret.
   `;
@@ -847,35 +850,35 @@ export const decideAssetUsage = async (
   const layerInfo = blueprint ? `Blueprint has ${blueprint.layers.length} layers. Layout: ${blueprint.layout.type}, Style: ${blueprint.canvas.style}` : 'No blueprint available.';
 
   const prompt = `
-    You are a Senior Art Director making asset decisions for a brand creative.
+    Sen bir Kıdemli Sanat Yönetmensin. Marka kreatifi için varlık (asset) kararları veriyorsun.
 
-    BRAND: ${brand.name} (${brand.industry})
-    TOPIC: "${topic}"
-    DESIGN INFO: ${layerInfo}
+    MARKA: ${brand.name} (${brand.industry})
+    KONU: "${topic}"
+    TASARIM BİLGİSİ: ${layerInfo}
 
-    AVAILABLE BRAND ASSETS:
-    ${assetList || 'None'}
+    MEVCUT MARKA VARLIKLARI:
+    ${assetList || 'Yok'}
 
-    PRICING PLANS:
-    ${pricingList || 'None'}
+    FİYATLANDIRMA PLANLARI:
+    ${pricingList || 'Yok'}
 
-    SLOGANS:
-    ${sloganList || 'None'}
+    SLOGANLAR:
+    ${sloganList || 'Yok'}
 
-    TASK: Decide which assets, pricing info, and slogans should be used in this creative.
+    GÖREV: Bu kreatif için hangi varlıkların, fiyat bilgilerinin ve sloganların kullanılacağına karar ver.
 
-    DECISION RULES:
-    1. QR codes → Use ONLY when the topic relates to app download, sign-up, or "scan to get"
-    2. App Store / Play Store badges → Use when topic is about mobile app promotion
-    3. Product photos → Use when topic showcases a specific product
-    4. Pricing → Use when topic is about offers, plans, or comparisons
-    5. Slogans → Choose the most relevant one for this topic's mood
-    6. DON'T overcrowd — max 2-3 assets per creative
-    7. Consider the design layout — assets need physical space to fit
-    8. App icon → Use when the topic is app-focused
-    9. Trust badges → Use for credibility topics (reviews, awards, certifications)
+    KARAR KURALLARI:
+    1. QR kodlar → SADECE uygulama indirme, kayıt olma veya "tara ve al" konularında kullan
+    2. App Store / Play Store rozetleri → Mobil uygulama tanıtımı konularında kullan
+    3. Ürün fotoğrafları → Belirli bir ürün sergilendiğinde kullan
+    4. Fiyatlandırma → Teklif, plan veya karşılaştırma konularında kullan
+    5. Sloganlar → Bu konunun ruh haline en uygun olanı seç
+    6. Tasarımı KALABALIKLAŞTIRMA — kreatif başına maksimum 2-3 varlık
+    7. Tasarım layout'unu düşün — varlıkların sığacak fiziksel alana ihtiyacı var
+    8. Uygulama ikonu → Konu uygulama odaklıysa kullan
+    9. Güven rozetleri → Güvenilirlik konularında kullan (yorumlar, ödüller, sertifikalar)
 
-    For each asset, suggest a placement area in the design.
+    Her varlık için tasarımdaki bir yerleşim alanı öner.
   `;
 
   const response = await ai.models.generateContent({
@@ -1485,79 +1488,93 @@ export const generatePipelineTopics = async (
   brand: Brand,
   count: number,
   aspectRatio: string,
-  referenceImages?: { base64: string; name: string }[]
+  referenceImages?: { base64: string; name: string }[],
+  creativeTone?: string
 ): Promise<string[]> => {
   const ai = getAI();
 
+  const isEnglish = brand.outputLanguage === 'en';
+
   const formatMap: Record<string, string> = {
-    '1:1': 'Instagram square post',
-    '4:5': 'Instagram portrait post',
+    '1:1': 'Instagram kare post',
+    '4:5': 'Instagram portre post',
     '9:16': 'Instagram/TikTok Story',
     '16:9': 'YouTube thumbnail / LinkedIn banner',
   };
-  const format = formatMap[aspectRatio] || 'social media post';
+  const format = formatMap[aspectRatio] || 'sosyal medya gönderi';
 
   const today = new Date();
-  const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-  const currentMonth = monthNames[today.getMonth()];
+  const aylar = ['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
+  const currentMonth = aylar[today.getMonth()];
   const currentYear = today.getFullYear();
+
+  const toneDescriptions: Record<string, string> = {
+    'kurumsal': 'Profesyonel, güven veren, ciddi ama sıcak. Kurumsal dil, net mesajlar.',
+    'esprili': 'Şakacı, zekice, mizahi. Kelime oyunları, esprili yaklaşım, dikkat çekici.',
+    'eglenceli': 'Enerjik, canlı, neşeli. Dinamik ifadeler, ünlem işaretleri, coşkulu.',
+    'samimi': 'Sıcak, arkadaşça, içten. Konuşma dili, "biz" ve "sen" hitabı.',
+    'luks': 'Sofistike, zarif, seçkin. Minimal ifadeler, premium hissiyat, az söz çok anlam.',
+    'genc': 'Trend, cesur, enerjik. Güncel jargon, kısa ve vurucu, sosyal medya dili.',
+  };
+  const toneGuide = creativeTone ? (toneDescriptions[creativeTone] || '') : '';
 
   const hasRefs = referenceImages && referenceImages.length > 0;
 
   const prompt = `
-    You are a world-class Creative Director and Social Media Strategist who has worked at
-    top agencies like Wieden+Kennedy, Ogilvy, and BBDO. You have won multiple Cannes Lions awards.
+    Sen Cannes Lions, D&AD ve One Show ödüllü, dünyanın en iyi reklam ajanslarında çalışmış
+    bir Kreatif Direktör ve Sosyal Medya Stratejistisin.
 
-    BRAND INFO:
-    - Name: ${brand.name}
-    - Industry: ${brand.industry}
-    - Description: ${brand.description || 'Not specified'}
-    - Brand Tone: ${brand.tone}
-    - Color Palette: ${brand.palette.map(c => `${c.name} (${c.hex})`).join(', ')}
+    MARKA BİLGİSİ:
+    - İsim: ${brand.name}
+    - Sektör: ${brand.industry}
+    - Açıklama: ${brand.description || 'Belirtilmemiş'}
+    - Marka Tonu: ${brand.tone}
+    - Renk Paleti: ${brand.palette.map(c => `${c.name} (${c.hex})`).join(', ')}
     ${brand.instagram ? `- Instagram: @${brand.instagram}` : ''}
 
-    DATE: ${currentMonth} ${currentYear}
+    TARİH: ${currentMonth} ${currentYear}
     FORMAT: ${format} (${aspectRatio})
 
+    ${toneGuide ? `KREATİF YAKLAŞIM: ${toneGuide}
+    Tüm konu önerileri bu yaklaşıma uygun olmalı.` : ''}
+
     ${hasRefs ? `
-    CRITICAL — REFERENCE IMAGES PROVIDED:
-    I have uploaded ${referenceImages!.length} reference image(s). These are DESIGN REFERENCES
-    that show the visual style and layout we want to replicate.
+    KRİTİK — REFERANS GÖRSELLER YÜKLENDI:
+    ${referenceImages!.length} adet referans görsel yüklendi. Bunlar replike etmek istediğimiz
+    görsel stili ve layout'u gösteren TASARIM REFERANSLARI.
 
-    ANALYZE EACH REFERENCE IMAGE carefully and generate topics that:
-    1. MATCH the visual theme/mood of each reference (e.g. if image shows food photography, generate food-related topics)
-    2. FIT the layout structure (e.g. if image has a big headline + small subtext, the topic should have a punchy headline idea)
-    3. COMPLEMENT the reference's aesthetic (minimalist → clean topic, bold → energetic topic)
-    4. Are DIFFERENT from each other — each reference should inspire unique topics
-    5. If there are more topics than references, distribute evenly and create variations
-
-    Generate topics that a designer can execute using these exact reference styles.
+    HER REFERANS GÖRSELİ dikkatlice analiz et ve şu konularda uyumlu konular üret:
+    1. Her referansın görsel teması/mood'u ile EŞLEŞ (yemek fotoğrafı varsa → yemekle ilgili konular)
+    2. Layout yapısına UY (büyük başlık + küçük altmetin varsa → vurucu başlık fikriyle gel)
+    3. Referansın estetiğini TAMAMLA (minimalist → temiz konu, cesur → enerjik konu)
+    4. Birbirinden FARKLI olsunlar — her referans benzersiz konulara ilham versin
+    5. Konu sayısı referanstan fazlaysa, eşit dağıt ve varyasyonlar üret
     ` : `
-    No reference images provided — generate topics purely based on brand identity.
+    Referans görsel yüklenmedi — konuları tamamen marka kimliğinden üret.
     `}
 
-    TASK: Generate exactly ${count} AD VISUAL TOPICS for this brand.
-    Each topic will be given to a designer as a brief — so it must be visually designable,
-    concrete, and specific.
+    GÖREV: Bu marka için TAM OLARAK ${count} ADET REKLAM GÖRSELİ KONUSU üret.
+    Her konu bir tasarımcıya brief olarak verilecek — görsel olarak tasarlanabilir,
+    somut ve spesifik olmalı.
 
-    IMPORTANT RULES:
-    1. Each topic is a theme for an AD VISUAL (poster, banner, social media visual)
-    2. Be CONCRETE not abstract: Instead of "Summer campaign" write "${brand.name} Summer Sale — Up to 40% Off Selected Products"
-    3. Each topic must include a product/service/value proposition specific to ${brand.industry}
-    4. Ensure topic variety:
-       - Product/service showcase (at least 2)
-       - Campaign/discount/offer visual (at least 1)
-       - Motivational/inspirational post (at least 1)
-       - Seasonal/current event (suitable for ${currentMonth} ${currentYear})
-       - Customer trust/social proof (testimonial, success story)
-       - Educational/informative content (industry tip, how-to)
-    5. Each topic should be 1-2 sentences
-    6. Include a main message/slogan suggestion in each topic
-    7. Stay true to the brand tone (${brand.tone})
-    8. Topics must be UNIQUE — no repetition
-    9. These should be professional topics that a real brand would actually post
+    ÖNEMLİ KURALLAR:
+    1. Her konu bir REKLAM GÖRSELİ temasıdır (poster, banner, sosyal medya görseli)
+    2. SOMUT ol, soyut olma: "Yaz kampanyası" yerine "${brand.name} Yaz İndirimi — Seçili Ürünlerde %40'a Varan İndirim" yaz
+    3. Her konu ${brand.industry} sektörüne özgü bir ürün/hizmet/değer önerisi içermeli
+    4. Konu çeşitliliği sağla:
+       - Ürün/hizmet vitrin görseli (en az 2)
+       - Kampanya/indirim/teklif görseli (en az 1)
+       - Motivasyonel/ilham verici paylaşım (en az 1)
+       - Sezonluk/güncel etkinlik (${currentMonth} ${currentYear} için uygun)
+       - Müşteri güveni/sosyal kanıt (referans, başarı hikayesi)
+       - Eğitici/bilgilendirici içerik (sektör ipucu, nasıl yapılır)
+    5. Her konu 1-2 cümle olsun
+    6. Her konuda ana mesaj/slogan önerisi bulunsun
+    7. Marka tonuna sadık kal (${brand.tone})
+    8. Konular BENZERSİZ olmalı — tekrar yok
+    9. Gerçek bir markanın gerçekten paylaşacağı profesyonel konular olmalı
 
-    OUTPUT LANGUAGE: English — all topics must be written in English.
+    ÇIKTI DİLİ: ${isEnglish ? 'İngilizce — tüm konular İngilizce yazılmalı.' : 'Türkçe — tüm konular Türkçe yazılmalı.'}
   `;
 
   const parts: any[] = [];
@@ -1614,7 +1631,8 @@ export const generateDesignDirectives = async (
   brand: Brand,
   topic: string,
   style: StyleAnalysis,
-  aspectRatio: string
+  aspectRatio: string,
+  creativeTone?: string
 ): Promise<DesignDirectives> => {
   const ai = getAI();
 
@@ -1635,6 +1653,7 @@ export const generateDesignDirectives = async (
     ${brand.description ? `AÇIKLAMA: ${brand.description}` : ''}
     TON: ${brand.tone}
     RENK PALETİ: ${brand.palette.map(c => `${c.name}: ${c.hex}`).join(', ')}
+    ${creativeTone ? `KREATİF YAKLAŞIM: ${creativeTone === 'kurumsal' ? 'Kurumsal — profesyonel, güven veren, ciddi ama sıcak tonda' : creativeTone === 'esprili' ? 'Esprili — şakacı, zekice, mizahi, kelime oyunlarıyla dikkat çekici' : creativeTone === 'eglenceli' ? 'Eğlenceli — enerjik, canlı, neşeli, dinamik ve coşkulu' : creativeTone === 'samimi' ? 'Samimi — sıcak, arkadaşça, içten, konuşma dili' : creativeTone === 'luks' ? 'Lüks/Premium — sofistike, zarif, seçkin, minimal ifadeler' : creativeTone === 'genc' ? 'Genç/Dinamik — trend, cesur, güncel jargon, kısa ve vurucu' : creativeTone}. Tüm tasarım direktifleri bu yaklaşıma uygun olmalı.` : ''}
 
     KONU: ${topic}
     FORMAT: ${format} (${aspectRatio})

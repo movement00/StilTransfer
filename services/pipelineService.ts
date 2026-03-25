@@ -447,9 +447,9 @@ export class PipelineService {
       try {
         // Run directives, content plan, and asset decisions in parallel
         const [directives, contentPlan, assetPlan] = await Promise.all([
-          generateDesignDirectives(brand, topic, analysis, config.aspectRatio),
+          generateDesignDirectives(brand, topic, analysis, config.aspectRatio, config.creativeTone),
           blueprint
-            ? generateContentPlan(blueprint, brand, topic, { typographyRules: '', colorStrategy: '', compositionGuide: '', hierarchyPlan: '', fullDirective: '' })
+            ? generateContentPlan(blueprint, brand, topic, { typographyRules: '', colorStrategy: '', compositionGuide: '', hierarchyPlan: '', fullDirective: '' }, config.creativeTone)
             : Promise.resolve(null),
           hasAssets
             ? decideAssetUsage(brand, topic, blueprint || null)
@@ -460,7 +460,7 @@ export class PipelineService {
         let finalContentPlan = contentPlan;
         if (blueprint && directives) {
           try {
-            finalContentPlan = await generateContentPlan(blueprint, brand, topic, directives);
+            finalContentPlan = await generateContentPlan(blueprint, brand, topic, directives, config.creativeTone);
           } catch {
             // Use the first pass if second fails
           }

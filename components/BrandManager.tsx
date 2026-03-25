@@ -29,6 +29,7 @@ const BrandManager: React.FC<BrandManagerProps> = ({ brands, setBrands }) => {
     secondaryColor: '#201C1D',
     palette: [],
     tone: 'Profesyonel, Güvenilir, Premium',
+    outputLanguage: 'tr' as const,
     instagram: '',
     phone: '',
     address: ''
@@ -274,6 +275,31 @@ const BrandManager: React.FC<BrandManagerProps> = ({ brands, setBrands }) => {
                     className="w-full bg-lumina-950 border border-lumina-800 rounded-lg p-3 text-white focus:border-lumina-gold focus:outline-none placeholder-slate-600 resize-none h-16"
                     placeholder="Örn: Yenilikçi, Enerjik, Modern, Samimi"
                   />
+                </div>
+                <div>
+                  <label className="block text-sm text-slate-400 mb-1">Çıktı Dili</label>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setNewBrand({...newBrand, outputLanguage: 'tr'})}
+                      className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all border ${
+                        newBrand.outputLanguage !== 'en'
+                          ? 'bg-lumina-gold/20 border-lumina-gold/50 text-lumina-gold'
+                          : 'bg-lumina-950 border-lumina-800 text-slate-400 hover:border-lumina-700'
+                      }`}
+                    >
+                      Türkçe
+                    </button>
+                    <button
+                      onClick={() => setNewBrand({...newBrand, outputLanguage: 'en'})}
+                      className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all border ${
+                        newBrand.outputLanguage === 'en'
+                          ? 'bg-lumina-gold/20 border-lumina-gold/50 text-lumina-gold'
+                          : 'bg-lumina-950 border-lumina-800 text-slate-400 hover:border-lumina-700'
+                      }`}
+                    >
+                      English
+                    </button>
+                  </div>
                 </div>
               </div>
 

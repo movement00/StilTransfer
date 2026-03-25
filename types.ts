@@ -49,6 +49,7 @@ export interface Brand {
   secondaryColor: string;
   palette: BrandColor[];
   tone: string;
+  outputLanguage?: 'tr' | 'en';  // Çıktı dili: Türkçe veya İngilizce
   // Contact Details
   instagram?: string;
   phone?: string;
@@ -239,6 +240,7 @@ export interface PipelineConfig {
   revisionPrompt?: string;
   saveAsTemplate: boolean;
   templateFolderId?: string;
+  creativeTone?: string;       // Kreatif yaklaşım: kurumsal, esprili, eğlenceli, samimi, vb.
   createdAt: number;
 }
 
