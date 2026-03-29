@@ -20,10 +20,7 @@ export interface ContentPlan {
 const API_KEY_STORAGE = 'lumina_gemini_api_key';
 
 export function getApiKey(): string {
-  // 1. Build-time env (Vercel / AI Studio)
-  const envKey = process.env.API_KEY || process.env.GEMINI_API_KEY || '';
-  if (envKey) return envKey;
-  // 2. User-provided (localStorage)
+  // User-provided (localStorage) — no build-time keys, no bundle exposure
   try { return localStorage.getItem(API_KEY_STORAGE) || ''; } catch { return ''; }
 }
 
