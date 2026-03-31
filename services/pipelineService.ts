@@ -518,26 +518,29 @@ export class PipelineService {
           });
         }
 
-        const textLayerCount = finalContentPlan?.layerContents.length || 0;
+        const brainResult = brainMap.get(match.topicIndex);
+        const resultContentPlan = brainResult?.contentPlan;
+        const resultAssetPlan = brainResult?.assetPlan;
+        const textLayerCount = resultContentPlan?.layerContents.length || 0;
         this.log(`  → Direktif: ✓ (tipografi + renk + kompozisyon + hiyerarşi)`);
-        this.log(`  → İçerik: ✓ (${textLayerCount} metin katmanı için akıllı içerik)`);
-        if (finalContentPlan) {
-          this.log(`  → Başlık: "${finalContentPlan.headline}"`);
-          this.log(`  → CTA: "${finalContentPlan.ctaText}"`);
+        this.log(`  → İçerik: ✓ (${textLayerCount} metin katmanı için akıllı içerik)${isTemplate ? ' [ŞABLON — sabit metin]' : ''}`);
+        if (resultContentPlan) {
+          this.log(`  → Başlık: "${resultContentPlan.headline}"`);
+          this.log(`  → CTA: "${resultContentPlan.ctaText}"`);
         }
-        if (assetPlan) {
-          const usedAssets = assetPlan.decisions.filter(d => d.shouldUse);
+        if (resultAssetPlan) {
+          const usedAssets = resultAssetPlan.decisions.filter((d: any) => d.shouldUse);
           if (usedAssets.length > 0) {
-            this.log(`  → Asset Agent: ${usedAssets.length} varlık kullanılacak (${usedAssets.map(d => {
+            this.log(`  → Asset Agent: ${usedAssets.length} varlık kullanılacak (${usedAssets.map((d: any) => {
               const a = brand.assets?.find(x => x.id === d.assetId);
               return a?.name || d.assetId;
             }).join(', ')})`);
           } else {
             this.log(`  → Asset Agent: Bu konu için ekstra varlık gerekmez`);
           }
-          if (assetPlan.sloganToUse) this.log(`  → Slogan: "${assetPlan.sloganToUse}"`);
-          if (assetPlan.pricingToShow) {
-            const plan = brand.pricing?.find(p => p.id === assetPlan.pricingToShow);
+          if (resultAssetPlan.sloganToUse) this.log(`  → Slogan: "${resultAssetPlan.sloganToUse}"`);
+          if (resultAssetPlan.pricingToShow) {
+            const plan = brand.pricing?.find(p => p.id === resultAssetPlan.pricingToShow);
             if (plan) this.log(`  → Fiyat: ${plan.name} — ${plan.price}`);
           }
         }
