@@ -14,6 +14,64 @@ import { resizeImageToRawBase64, generatePipelineTopics, reviseGeneratedImage, a
 import { downloadBase64Image, downloadMultipleImages } from '../services/downloadService';
 import { searchInspiration, downloadImage, scoreAndRankResults } from '../services/scoutService';
 
+// Qoolline Campaign Templates from Banner Texts Excel
+const CAMPAIGN_TEMPLATES = [
+  {
+    id: 'value_conversion',
+    type: 'Value / Conversion',
+    core: 'Stop Paying Roaming Fees',
+    supporting: 'Instant eSIM activation',
+    cta: 'Get eSIM',
+    extra: 'Fast & Reliable Data',
+    notes: 'Clear problem–solution framing. CTA should push toward transaction.',
+  },
+  {
+    id: 'brand_awareness',
+    type: 'Brand / Awareness',
+    core: 'Seamless Connectivity for Modern Travellers',
+    supporting: 'Coverage across 175+ destinations',
+    cta: 'Explore Plans',
+    extra: 'Easy Set Up & Activation',
+    notes: 'Strong brand promise & scale proof. CTA should not be aggressive. Store logos should be removed.',
+  },
+  {
+    id: 'product_performance',
+    type: 'Product / Performance',
+    core: 'Travel connected. Your eSIM, ready in minutes',
+    supporting: 'No roaming fees abroad',
+    cta: 'Get eSIM',
+    extra: 'Instant eSIM Activation',
+    notes: 'Balances emotional travel feel with a concrete benefit.',
+  },
+  {
+    id: 'awareness_app',
+    type: 'Awareness / App',
+    core: 'The World at Your Fingertips, Wherever You Travel',
+    supporting: 'Instant eSIM, Reliable Coverage',
+    cta: 'Download',
+    extra: 'Simple App for Travel Data',
+    notes: 'Brand-led and aspirational. Best for upper funnel or retargeting. Use Download CTA with store logos.',
+  },
+  {
+    id: 'promo_app',
+    type: 'Promo / App or Web',
+    core: 'Welcome to Seamless Travel Connectivity',
+    supporting: 'Use code WELCOME',
+    cta: 'Get eSIM',
+    extra: 'Easy Set Up',
+    notes: 'Clear incentive. CTA must reflect whether the goal is install or purchase.',
+  },
+  {
+    id: 'direct_conversion',
+    type: 'Direct Conversion',
+    core: '10% off your Travel eSIM',
+    supporting: 'Use code WELCOME at checkout',
+    cta: 'Explore Plans',
+    extra: 'No Roaming Fees / Fast Data',
+    notes: 'Pure performance creative. Discount must be the hero, CTA must be transactional.',
+  },
+];
+
 interface PipelineDashboardProps {
   brands: Brand[];
   templates: SavedTemplate[];
@@ -679,7 +737,35 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
                   <><Sparkles size={12} /> {referenceImages.length > 0 ? `Görsellerden ${topicCount} Konu Üret` : `AI ile ${topicCount} Konu Üret`}</>
                 )}
               </button>
+              <button
+                onClick={() => {
+                  const campaignTopics = CAMPAIGN_TEMPLATES.map(t =>
+                    `[${t.type}] ${t.core} | ${t.supporting} | CTA: ${t.cta} | ${t.extra}`
+                  );
+                  setTopicsText(campaignTopics.join('\n'));
+                }}
+                disabled={isRunning}
+                className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium bg-amber-500/15 text-amber-400 border border-amber-500/30 hover:bg-amber-500/25 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <FileText size={12} /> Şablonlar ile Üret ({CAMPAIGN_TEMPLATES.length})
+              </button>
             </div>
+
+            {/* Campaign Template Preview */}
+            {topicsText.includes('[Value / Conversion]') && (
+              <div className="mb-3 p-2.5 bg-amber-500/5 border border-amber-500/20 rounded-lg">
+                <p className="text-[10px] text-amber-400 font-medium mb-1.5">Kampanya Şablonları Yüklendi</p>
+                <div className="space-y-1">
+                  {CAMPAIGN_TEMPLATES.map(t => (
+                    <div key={t.id} className="flex items-center gap-2 text-[10px]">
+                      <span className="text-amber-400/60 w-28 shrink-0 truncate">{t.type}</span>
+                      <span className="text-slate-400 truncate">{t.core}</span>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[9px] text-slate-500 mt-1.5">Metinler sabit kalacak, AI sadece görsel stili eşleştirecek.</p>
+              </div>
+            )}
 
             {/* Reference Images */}
             <label className="block text-xs text-slate-400 mb-1">

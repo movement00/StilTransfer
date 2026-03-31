@@ -442,41 +442,81 @@ export class PipelineService {
 
       if (!analysis) continue;
 
-      this.log(`Beyin çalışıyor (${i + 1}/${matches.length}): "${topic}"`);
+      // Check if this topic is a campaign template (format: [Type] Core | Supporting | CTA: cta | Extra)
+      const templateMatch = topic.match(/^\[(.+?)\]\s*(.+?)\s*\|\s*(.+?)\s*\|\s*CTA:\s*(.+?)\s*\|\s*(.+)$/);
+      const isTemplate = !!templateMatch;
+      const cleanTopic = isTemplate ? templateMatch![2].trim() : topic;
+
+      this.log(`Beyin çalışıyor (${i + 1}/${matches.length}): "${cleanTopic}"${isTemplate ? ' [ŞABLON]' : ''}`);
 
       try {
-        // Run directives, content plan, and asset decisions in parallel
-        const [directives, contentPlan, assetPlan] = await Promise.all([
-          generateDesignDirectives(brand, topic, analysis, config.aspectRatio, config.creativeTone),
-          blueprint
-            ? generateContentPlan(blueprint, brand, topic, { typographyRules: '', colorStrategy: '', compositionGuide: '', hierarchyPlan: '', fullDirective: '' }, config.creativeTone)
-            : Promise.resolve(null),
-          hasAssets
-            ? decideAssetUsage(brand, topic, blueprint || null)
-            : Promise.resolve(null),
-        ]);
+        if (isTemplate) {
+          // Campaign template mode: use exact texts, don't let AI rewrite
+          const [, , core, supporting, cta, extra] = templateMatch!;
+          const [directives, assetPlan] = await Promise.all([
+            generateDesignDirectives(brand, cleanTopic, analysis, config.aspectRatio, config.creativeTone),
+            hasAssets ? decideAssetUsage(brand, cleanTopic, blueprint || null) : Promise.resolve(null),
+          ]);
 
-        // If we got a content plan, regenerate it with actual directives for better quality
-        let finalContentPlan = contentPlan;
-        if (blueprint && directives) {
-          try {
-            finalContentPlan = await generateContentPlan(blueprint, brand, topic, directives, config.creativeTone);
-          } catch {
-            // Use the first pass if second fails
+          // Force content plan with template texts — AI doesn't touch these
+          const templateContentPlan = {
+            layerContents: blueprint ? blueprint.layers
+              .filter((l: any) => l.type === 'text' || l.type === 'logo')
+              .map((l: any, idx: number) => ({
+                layerId: l.id,
+                originalContent: l.content || '',
+                newContent: idx === 0 ? core.trim()
+                  : idx === 1 ? supporting.trim()
+                  : idx === 2 ? cta.trim()
+                  : extra.trim(),
+                reasoning: 'Campaign template — exact text used as specified.',
+              })) : [],
+            headline: core.trim(),
+            subheadline: supporting.trim(),
+            ctaText: cta.trim(),
+            brandMessage: extra.trim(),
+          };
+
+          brainMap.set(match.topicIndex, {
+            directives,
+            contentPlan: templateContentPlan,
+            assetPlan,
+          });
+        } else {
+          // Normal mode: AI generates content
+          // Run directives, content plan, and asset decisions in parallel
+          const [directives, contentPlan, assetPlan] = await Promise.all([
+            generateDesignDirectives(brand, topic, analysis, config.aspectRatio, config.creativeTone),
+            blueprint
+              ? generateContentPlan(blueprint, brand, topic, { typographyRules: '', colorStrategy: '', compositionGuide: '', hierarchyPlan: '', fullDirective: '' }, config.creativeTone)
+              : Promise.resolve(null),
+            hasAssets
+              ? decideAssetUsage(brand, topic, blueprint || null)
+              : Promise.resolve(null),
+          ]);
+
+          // If we got a content plan, regenerate it with actual directives for better quality
+          let finalContentPlan = contentPlan;
+          if (blueprint && directives) {
+            try {
+              finalContentPlan = await generateContentPlan(blueprint, brand, topic, directives, config.creativeTone);
+            } catch {
+              // Use the first pass if second fails
+            }
           }
-        }
 
-        brainMap.set(match.topicIndex, {
-          directives,
-          contentPlan: finalContentPlan || {
-            layerContents: [],
-            headline: topic,
-            subheadline: `${brand.name} — ${brand.industry}`,
-            ctaText: 'Keşfet',
-            brandMessage: brand.description || brand.name,
-          },
-          assetPlan,
-        });
+          brainMap.set(match.topicIndex, {
+            directives,
+            contentPlan: finalContentPlan || {
+              layerContents: [],
+              headline: topic,
+              subheadline: `${brand.name} — ${brand.industry}`,
+              ctaText: 'Keşfet',
+              brandMessage: brand.description || brand.name,
+            },
+            assetPlan,
+          });
+        }
 
         const textLayerCount = finalContentPlan?.layerContents.length || 0;
         this.log(`  → Direktif: ✓ (tipografi + renk + kompozisyon + hiyerarşi)`);

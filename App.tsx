@@ -11,128 +11,36 @@ import { ViewState, Brand, SavedTemplate, GeneratedAsset, TemplateFolder } from 
 import { hasApiKey, setApiKey, getApiKey } from './services/geminiService';
 import { downloadBase64Image } from './services/downloadService';
 
-// Initial Mock Data (Translated)
+// Qoolline Brand Configuration
 const INITIAL_BRANDS: Brand[] = [
   {
     id: '1',
     name: 'Qoolline',
-    industry: 'Telekomünikasyon & E-SIM',
-    description: 'Qoolline, dünyayı birbirine bağlayan, seyahatseverler ve global işletmeler için kesintisiz, uygun fiyatlı ve anında aktif olan yeni nesil dijital e-SIM çözümleri sunar.',
+    industry: 'International eSIM & Travel Connectivity',
+    description: 'Qoolline is a next-generation international eSIM provider offering seamless, affordable, and instantly activated digital connectivity for modern travellers and global businesses. Coverage across 175+ destinations with no roaming fees. Simple app-based setup with instant activation.',
     logo: null,
     primaryColor: '#F8BE00',
     secondaryColor: '#201C1D',
-    tone: 'Yenilikçi, Global, Teknolojik, Hızlı, Kullanıcı Dostu',
+    tone: 'Innovative, Global, Tech-forward, Fast, User-friendly, Premium yet Accessible',
     outputLanguage: 'en',
+    instagram: 'qoolline',
+    website: 'www.qoolline.com',
     palette: [
       { name: 'Brand Yellow', hex: '#F8BE00' },
       { name: 'Brand Black', hex: '#201C1D' },
-      { name: 'Tech Blue', hex: '#6B63FF' },
-      { name: 'Subtext Grey', hex: '#737485' },
-      { name: 'Brand Yellow %10', hex: '#FFFAEA' },
-      { name: 'Brand Yellow %8', hex: '#FEF5D7' },
-      { name: 'Tech Blue Tint', hex: '#E9E8FF' }
-    ]
-  },
-  {
-    id: '3',
-    name: 'Düzce Kültür Koleji',
-    industry: 'Eğitim (K12)',
-    description: 'Modern eğitim anlayışı, akademik disiplin ve öğrenci enerjisini birleştiren köklü eğitim kurumu.',
-    logo: null,
-    primaryColor: '#E6007E',
-    secondaryColor: '#1CB6C9',
-    tone: 'Enerjik, Güvenilir, Akademik, Modern, Öğrenci Odaklı',
-    palette: [
-      { name: 'Canlı Pembe (Ana Marka)', hex: '#E6007E' },
-      { name: 'Turkuaz (Eğitim & Güven)', hex: '#1CB6C9' },
-      { name: 'Canlı Sarı (Okul Enerjisi)', hex: '#FFD400' },
-      { name: 'Lacivert (Kurumsal)', hex: '#0F2A44' },
-      { name: 'Beyaz (Temel Zemin)', hex: '#FFFFFF' },
-      { name: 'Açık Gri (Arka Plan)', hex: '#F2F4F7' }
-    ]
-  },
-  {
-    id: '7',
-    name: 'Düzce Kültür Anaokulu',
-    industry: 'Okul Öncesi Eğitim & Çocuk Gelişimi',
-    description: 'Düzce Kültür Anaokulu, "Mutlu Çocuk, Başarılı Gelecek" mottosuyla; çocukların doğuştan gelen merak duygusunu oyun temelli öğrenme ile birleştiren, duygusal zeka ve yaşam becerilerini geliştirmeye odaklanan sevgi dolu bir eğitim yuvasıdır. Çocukları sadece okula değil, hayata hazırlayan, özgüvenli ve yaratıcı bireyler yetiştirmeyi hedefler.',
-    logo: null,
-    primaryColor: '#E6007E',
-    secondaryColor: '#1CB6C9',
-    tone: 'Sevecen, Eğlenceli, Yaratıcı, Merak Uyandıran, Güvenli, Geliştirici',
-    palette: [
-      { name: 'Güneş Sarısı (Baskın - Neşe)', hex: '#FFD400' },
-      { name: 'Kültür Pembesi (Ana)', hex: '#E6007E' },
-      { name: 'Kültür Turkuazı (İkincil)', hex: '#1CB6C9' },
-      { name: 'Fıstık Yeşili (Büyüme & Doğa)', hex: '#8BC34A' },
-      { name: 'Gök Mavisi (Huzur)', hex: '#4FC3F7' },
-      { name: 'Sıcak Turuncu (Enerji)', hex: '#FF9800' },
-      { name: 'Krem (Yumuşak Zemin)', hex: '#FFFDE7' }
-    ]
-  },
-  {
-    id: '4',
-    name: 'Düzce Kültür Kurs',
-    industry: 'Sınava Hazırlık Merkezi',
-    description: 'Üniversite sınavlarına hazırlanan lise ve mezun öğrencilere yönelik; disiplinli, hedef odaklı ve akademik başarıyı garantileyen profesyonel öğretim merkezi.',
-    logo: null,
-    primaryColor: '#E6007E',
-    secondaryColor: '#1CB6C9',
-    tone: 'Motivasyon Dolu, Disiplinli, Hedef Odaklı, Dinamik, Başarı',
-    palette: [
-      { name: 'Canlı Pembe (Vurgu & Enerji)', hex: '#E6007E' },
-      { name: 'Turkuaz (Odak & Başarı)', hex: '#1CB6C9' },
-      { name: 'Lacivert (Akademik Ciddiyet)', hex: '#0F2A44' },
-      { name: 'Canlı Sarı (Motivasyon)', hex: '#FFD400' },
-      { name: 'Beyaz (Netlik)', hex: '#FFFFFF' },
-      { name: 'Gri (Zemin)', hex: '#F2F4F7' }
-    ]
-  },
-  {
-    id: '5',
-    name: 'Düzce Teknokent Koleji',
-    industry: 'Özel Lise / Teknik & Anadolu',
-    description: 'Düzce Teknokent Koleji, yalnızca lise düzeyinde eğitim veren; teknik ve Anadolu lisesi müfredatını birlikte uygulayan, devlet destekli özel okul modeliyle akademik ve mesleki eğitimi bir araya getiren yenilikçi bir eğitim kurumudur. Teknoloji odaklı yaklaşımı ve güçlü akademik yapısıyla öğrencilerini üniversiteye ve geleceğin mesleklerine hazırlar.',
-    logo: null,
-    primaryColor: '#F26A1B',
-    secondaryColor: '#0B1C2D',
-    tone: 'Yenilikçi, Teknolojik, Disiplinli, Üretken, Akademik',
-    palette: [
-      { name: 'Teknokent Turuncu (Enerji & Teknoloji)', hex: '#F26A1B' },
-      { name: 'Kurumsal Lacivert (Güven & Ciddiyet)', hex: '#0B1C2D' },
-      { name: 'Siyah (Netlik)', hex: '#000000' },
-      { name: 'Beyaz (Denge)', hex: '#FFFFFF' }
-    ]
-  },
-  {
-    id: '6',
-    name: 'Happy Scarfs',
-    industry: 'Tesettür Giyim & Eşarp',
-    description: 'Happy Scarfs, modern tesettür modasında zarafeti ve konforu buluşturan; ipek, pamuk ve keten gibi doğal dokularla tasarlanmış geniş eşarp ve şal koleksiyonları sunan öncü bir markadır. Her mevsime uygun renkleri ve desenleriyle şıklığınızı tamamlar.',
-    logo: null,
-    primaryColor: '#D48C94',
-    secondaryColor: '#8D7B68',
-    tone: 'Zarif, Modern, Doğal, Sofistike, Yumuşak, Feminen',
-    palette: [
-      { name: 'Dusty Rose (Zarafet)', hex: '#D48C94' },
-      { name: 'Warm Taupe (Doğallık)', hex: '#8D7B68' },
-      { name: 'Soft Cream (Zemin)', hex: '#F9F4EF' },
-      { name: 'Deep Burgundy (Kontrast)', hex: '#592E38' },
-      { name: 'Antique Gold (Lüks Detay)', hex: '#C5A059' }
-    ]
-  },
-  {
-    id: '2',
-    name: 'Aura Living',
-    industry: 'İç Mimarlık',
-    description: 'Aura Living, minimalist ve sürdürülebilir yaşam alanları tasarlayan butik bir iç mimarlık stüdyosudur.',
-    logo: null,
-    primaryColor: '#e2e8f0',
-    secondaryColor: '#94a3b8',
-    tone: 'Minimalist, Sakin, Modern',
-    palette: [
-      { name: 'Slate 200', hex: '#e2e8f0' },
-      { name: 'Slate 400', hex: '#94a3b8' }
+      { name: 'Tertiary Brand Color', hex: '#6B63FF' },
+      { name: 'Brand Black - Subtitle', hex: '#737485' },
+      { name: 'Brand Yellow - %10', hex: '#FFFAEA' },
+      { name: 'Brand Yellow - %8', hex: '#FEF5D7' },
+      { name: 'Tertiary Tint', hex: '#E9E8FF' },
+      { name: 'Sweet Green', hex: '#00CC9B' }
+    ],
+    slogans: [
+      'Stop Paying Roaming Fees',
+      'Seamless Connectivity for Modern Travellers',
+      'Travel connected. Your eSIM, ready in minutes',
+      'The World at Your Fingertips, Wherever You Travel',
+      '10% off your Travel eSIM — Use code WELCOME'
     ]
   }
 ];
