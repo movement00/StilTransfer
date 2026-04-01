@@ -1137,6 +1137,84 @@ export const generateBrandedImage = async (
 };
 
 
+// 2.5 Quality Control — Review generated creative against brand rules
+export interface QualityReview {
+  score: number; // 1-10
+  passed: boolean; // score >= 7
+  issues: string[];
+  revisionInstruction: string | null; // null if passed
+}
+
+export const reviewCreativeQuality = async (
+  imageBase64: string,
+  brandName: string,
+): Promise<QualityReview> => {
+  const ai = getAI();
+
+  const parts: any[] = [
+    {
+      inlineData: {
+        mimeType: 'image/png',
+        data: imageBase64,
+      }
+    },
+    {
+      text: `You are a strict creative quality reviewer for the brand "${brandName}" (an international eSIM / travel connectivity company).
+
+Review this generated banner/creative against these MANDATORY brand rules and score it 1-10:
+
+RULES TO CHECK:
+1. SINGLE MESSAGE: There must be ONE clear main message. Multiple competing messages = fail.
+2. LOGO VISIBILITY: Logo must be high-contrast, clearly readable. Logo on gradient or low-contrast background = fail.
+3. BRAND COLORS: Must use brand colors (Yellow #F8BE00, Black #201C1D, Purple #6B63FF, Green #00CC9B). Off-brand colors = issue.
+4. CTA FORMAT: Call-to-action must be in BUTTON format (rounded rectangle with text inside). Plain text CTA = issue.
+5. MOBILE READABILITY: All text must be readable on a mobile phone screen. Tiny or low-contrast text = fail.
+6. NO AI ARTIFACTS: Image should NOT look obviously AI-generated. Distorted hands, faces, text, or objects = fail.
+7. TEXT ACCURACY: All text on the image must be spelled correctly with no placeholder text, no gibberish, no broken words. Any text error = fail.
+8. NO UNNECESSARY DECORATION: Avoid dots, waves, abstract shapes that don't serve the message. Decorative clutter = issue.
+9. PRODUCT VISIBILITY: The app interface or product must be clearly shown. Hidden or secondary product = issue.
+10. TEXT-BACKGROUND CONTRAST: Text must have sufficient contrast against its background. Hard to read text = fail.
+
+SCORING:
+- 9-10: Perfect, ready to publish
+- 7-8: Good, minor issues only
+- 5-6: Needs revision, significant issues
+- 1-4: Major problems, unusable
+
+Respond in JSON:
+{
+  "score": <number 1-10>,
+  "passed": <true if score >= 7>,
+  "issues": ["issue 1", "issue 2", ...],
+  "revisionInstruction": "<specific revision instruction to fix all issues, or null if passed>"
+}
+
+Be STRICT. If there are text errors, placeholder text, or AI artifacts, score LOW.
+ONLY return JSON, nothing else.`
+    }
+  ];
+
+  const response = await ai.models.generateContent({
+    model: 'gemini-3-pro-preview',
+    contents: { parts },
+    config: {
+      responseMimeType: 'application/json',
+    }
+  });
+
+  try {
+    const parsed = JSON.parse(response.text || '{}');
+    return {
+      score: parsed.score || 5,
+      passed: parsed.passed ?? (parsed.score >= 7),
+      issues: parsed.issues || [],
+      revisionInstruction: parsed.revisionInstruction || null,
+    };
+  } catch {
+    return { score: 5, passed: false, issues: ['Review parse failed'], revisionInstruction: null };
+  }
+};
+
 // 3. Revise Generated Image
 export const reviseGeneratedImage = async (
   originalImageBase64: string,

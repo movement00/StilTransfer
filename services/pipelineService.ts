@@ -7,6 +7,7 @@ import {
   analyzeImageStyle, decomposeToBlueprint, matchTopicsToStyles,
   generateBrandedImage, reconstructFromBlueprint, adaptMasterToFormat,
   generateDesignDirectives, generateContentPlan, decideAssetUsage,
+  reviewCreativeQuality, reviseGeneratedImage,
   DesignDirectives, ContentPlan, AssetPlanResult
 } from './geminiService';
 
@@ -92,12 +93,13 @@ export class PipelineService {
       { id: 'match', name: 'Akıllı Eşleştirme', description: 'Konular en uygun stillerle eşleştiriliyor', status: 'idle', progress: 0 },
       { id: 'brain', name: 'Kreatif Beyin', description: 'Direktifler + içerik planı + metin yazarlığı', status: 'idle', progress: 0 },
       { id: 'generate', name: 'Görsel Üretimi', description: `${totalItems} görsel üretiliyor (${formats.length} format)`, status: 'idle', progress: 0 },
+      { id: 'qc', name: 'Kalite Kontrol', description: 'Marka kurallarına uygunluk denetimi + otomatik revizyon', status: 'idle', progress: 0 },
       { id: 'save', name: 'Kayıt & Arşiv', description: 'Sonuçlar kaydediliyor', status: 'idle', progress: 0 },
     ];
 
     // Kreatif Beyin always runs — it's the intelligence layer
     if (!config.saveAsTemplate) {
-      steps[4].status = 'skipped';
+      steps[5].status = 'skipped';
     }
 
     const results: PipelineResult[] = [];
@@ -140,6 +142,9 @@ export class PipelineService {
 
       // ===== STEP 4: GENERATE (multi-format) =====
       await this.stepGenerate(config, brand, analyses, blueprints, matches, formats, signal, brainResults);
+
+      // ===== STEP 4.5: QUALITY CONTROL =====
+      await this.stepQualityControl(brand, signal);
 
       // ===== STEP 5: SAVE (optional) =====
       if (config.saveAsTemplate) {
@@ -557,6 +562,70 @@ export class PipelineService {
     this.updateStep('brain', { status: 'completed', completedAt: Date.now(), progress: 100 });
     this.log(`🧠 ${brainMap.size} konu için kreatif beyin tamamlandı.`);
     return brainMap;
+  }
+
+  // ===== STEP 4.5: Quality Control =====
+  private async stepQualityControl(brand: Brand, signal: AbortSignal): Promise<void> {
+    this.updateStep('qc', { status: 'running', startedAt: Date.now() });
+
+    const completedResults = this.currentRun!.results.filter(
+      r => r.status === 'completed' && r.generatedImageBase64
+    );
+
+    if (completedResults.length === 0) {
+      this.log('Kalite kontrol: Tamamlanan görsel yok, atlanıyor.');
+      this.updateStep('qc', { status: 'completed', completedAt: Date.now(), progress: 100 });
+      return;
+    }
+
+    this.log(`Kalite kontrol başlıyor — ${completedResults.length} görsel denetlenecek`);
+    let revised = 0;
+    let passed = 0;
+
+    for (let i = 0; i < completedResults.length; i++) {
+      if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+
+      const result = completedResults[i];
+      this.log(`🔍 Denetleniyor (${i + 1}/${completedResults.length}): "${result.topic}"`);
+
+      try {
+        const review = await reviewCreativeQuality(result.generatedImageBase64!, brand.name);
+
+        this.log(`  → Puan: ${review.score}/10 ${review.passed ? '✓' : '✗'}`);
+        if (review.issues.length > 0) {
+          this.log(`  → Sorunlar: ${review.issues.join(', ')}`);
+        }
+
+        if (!review.passed && review.revisionInstruction && result.generatedImageBase64) {
+          this.log(`  → Otomatik revizyon başlatılıyor...`);
+          try {
+            const revisedImage = await reviseGeneratedImage(
+              result.generatedImageBase64,
+              review.revisionInstruction,
+              null,
+            );
+            this.updateResult(result.id, {
+              revisedImageBase64: revisedImage,
+            });
+            revised++;
+            this.log(`  → Revize edildi ✓`);
+          } catch (revErr: any) {
+            this.log(`  → Revizyon başarısız: ${revErr.message}`);
+          }
+        } else if (review.passed) {
+          passed++;
+        }
+      } catch (err: any) {
+        this.log(`  → Denetim hatası: ${err.message}`);
+      }
+
+      this.updateStep('qc', {
+        progress: Math.round(((i + 1) / completedResults.length) * 100),
+      });
+    }
+
+    this.log(`Kalite kontrol tamamlandı: ${passed} geçti, ${revised} revize edildi, ${completedResults.length - passed - revised} düzeltilemeyen`);
+    this.updateStep('qc', { status: 'completed', completedAt: Date.now(), progress: 100 });
   }
 
   // ===== STEP 5: Save results as templates =====
