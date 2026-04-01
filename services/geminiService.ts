@@ -347,8 +347,16 @@ export const reconstructFromBlueprint = async (
     ? { dominant: brand.palette[0].hex, secondary: brand.palette[1].hex, accent: brand.palette[2].hex }
     : { dominant: brand.primaryColor, secondary: brand.secondaryColor, accent: brand.primaryColor };
 
+  // In template mode, filter out excess text/logo layers not in our template
+  const allowedLayerIds: Set<string> | null = (contentPlan as any)?._allowedLayerIds || null;
+  const filteredLayers = allowedLayerIds
+    ? blueprint.layers.filter(layer =>
+        (layer.type !== 'text' && layer.type !== 'logo') || allowedLayerIds.has(layer.id)
+      )
+    : blueprint.layers;
+
   // Remap layers: replace content with AI-planned content and brand colors
-  const remappedLayers = blueprint.layers.map(layer => {
+  const remappedLayers = filteredLayers.map(layer => {
     const l = { ...layer, style: { ...layer.style } };
 
     // Inject content plan into text layers
@@ -448,6 +456,7 @@ export const reconstructFromBlueprint = async (
        - Font boyutu, ağırlığı ve stili blueprint'teki gibi
        - Metinler OKUNAKLI ve NET olmalı — bulanık veya bozuk metin YASAK
        - DİL: Tüm metinler ${brand.outputLanguage === 'en' ? 'İNGİLİZCE' : 'TÜRKÇE'} olmalı
+       ${allowedLayerIds ? `- ŞABLON MODU: Görselde YALNIZCA yukarıdaki metin katmanları olmalı. Blueprint'te olmayan EK metin, yazı veya slogan EKLEME. Sadece belirtilen ${allowedLayerIds.size} metin katmanını kullan, fazlasını koyma.` : ''}
 
     3. RENKLER:
        - Referans görselin orijinal renklerini KULLANMA

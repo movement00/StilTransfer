@@ -460,22 +460,25 @@ export class PipelineService {
           ]);
 
           // Force content plan with template texts — AI doesn't touch these
+          // Only keep up to 4 text layers (core, supporting, cta, extra) — drop excess layers
+          const templateTexts = [core.trim(), supporting.trim(), cta.trim(), extra.trim()];
+          const textLayers = blueprint ? blueprint.layers.filter((l: any) => l.type === 'text' || l.type === 'logo') : [];
+          const limitedLayers = textLayers.slice(0, templateTexts.length);
+
           const templateContentPlan = {
-            layerContents: blueprint ? blueprint.layers
-              .filter((l: any) => l.type === 'text' || l.type === 'logo')
-              .map((l: any, idx: number) => ({
-                layerId: l.id,
-                originalContent: l.content || '',
-                newContent: idx === 0 ? core.trim()
-                  : idx === 1 ? supporting.trim()
-                  : idx === 2 ? cta.trim()
-                  : extra.trim(),
-                reasoning: 'Campaign template — exact text used as specified.',
-              })) : [],
+            layerContents: limitedLayers.map((l: any, idx: number) => ({
+              layerId: l.id,
+              originalContent: l.content || '',
+              newContent: templateTexts[idx],
+              reasoning: 'Campaign template — exact text used as specified.',
+            })),
             headline: core.trim(),
             subheadline: supporting.trim(),
             ctaText: cta.trim(),
             brandMessage: extra.trim(),
+            // Signal to reconstructFromBlueprint to remove extra text layers
+            _templateMode: true,
+            _allowedLayerIds: new Set(limitedLayers.map((l: any) => l.id)),
           };
 
           brainMap.set(match.topicIndex, {
