@@ -8,7 +8,7 @@ import {
   generateBrandedImage, reconstructFromBlueprint, adaptMasterToFormat,
   generateDesignDirectives, generateContentPlan, decideAssetUsage,
   reviewCreativeQuality, reviseGeneratedImage,
-  DesignDirectives, ContentPlan, AssetPlanResult
+  DesignDirectives, ContentPlan, AssetPlanResult, QualityReview
 } from './geminiService';
 
 type PipelineEventType = 'step-update' | 'result-update' | 'run-update' | 'log';
@@ -334,9 +334,64 @@ export class PipelineService {
           );
         }
 
+        // ─── INLINE QC: Check quality immediately after generation ───
+        const MAX_QC_RETRIES = 2;
+        let qcRetryCount = 0;
+        let qcPassed = false;
+        let qcScore = 0;
+        let qcIssues: string[] = [];
+
+        for (let attempt = 0; attempt <= MAX_QC_RETRIES; attempt++) {
+          if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+
+          try {
+            this.log(`  🔍 QC kontrol ${attempt > 0 ? `(retry ${attempt})` : ''}...`);
+            const review: QualityReview = await reviewCreativeQuality(masterImageBase64!, brand.name);
+            qcScore = review.score;
+            qcPassed = review.passed;
+            qcIssues = review.issues;
+
+            this.log(`  → QC Puan: ${review.score}/10 ${review.passed ? '✓ GEÇTİ' : '✗ KALDI'}`);
+            if (review.issues.length > 0) {
+              this.log(`  → Sorunlar: ${review.issues.join(', ')}`);
+            }
+
+            if (review.passed) {
+              break; // Quality is good, move on
+            }
+
+            // Not passed — try to revise if we have retries left
+            if (attempt < MAX_QC_RETRIES && review.revisionInstruction) {
+              qcRetryCount = attempt + 1;
+              this.log(`  → Revizyon başlatılıyor (${qcRetryCount}/${MAX_QC_RETRIES})...`);
+              try {
+                masterImageBase64 = await reviseGeneratedImage(
+                  masterImageBase64!,
+                  review.revisionInstruction,
+                  null,
+                );
+                this.log(`  → Revize edildi, tekrar kontrol ediliyor...`);
+              } catch (revErr: any) {
+                this.log(`  → Revizyon hatası: ${revErr.message}, mevcut görsel korunuyor.`);
+                break; // Can't revise, keep current image
+              }
+            } else if (attempt === MAX_QC_RETRIES) {
+              this.log(`  ⚠️ ${MAX_QC_RETRIES} retry sonrası hala düşük kalite — görsel işaretleniyor.`);
+            }
+          } catch (qcErr: any) {
+            this.log(`  → QC hatası: ${qcErr.message}, QC atlanıyor.`);
+            qcPassed = true; // Don't block pipeline on QC errors
+            break;
+          }
+        }
+
         this.updateResult(masterResultId, {
           status: 'completed',
           generatedImageBase64: masterImageBase64,
+          qcScore,
+          qcPassed,
+          qcRetryCount,
+          qcIssues,
         });
 
         completed++;
@@ -345,7 +400,7 @@ export class PipelineService {
           progress: Math.round((completed / totalGenerations) * 100),
         });
         this.updateRun({ completedItems: completed });
-        this.log(`  ✓ Master tamamlandı.`);
+        this.log(`  ✓ Master tamamlandı${!qcPassed ? ' (⚠️ düşük kalite)' : ''}.`);
 
       } catch (err: any) {
         this.updateResult(masterResultId, {

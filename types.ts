@@ -280,6 +280,11 @@ export interface PipelineResult {
   status: 'pending' | 'analyzing' | 'generating' | 'revising' | 'completed' | 'failed';
   error?: string;
   savedAsTemplateId?: string;
+  // Inline QC fields
+  qcScore?: number;        // 1-10
+  qcPassed?: boolean;
+  qcRetryCount?: number;   // 0-2
+  qcIssues?: string[];
 }
 
 export interface OptimizedPromptDetails {

@@ -594,40 +594,79 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
     setQcReviews(prev => { const next = { ...prev }; delete next[resultId]; return next; });
   };
 
-  const handleSingleRevision = async (resultId: string) => {
-    const prompt = singleRevisionPrompts[resultId];
+  const handleSingleRevision = async (resultId: string, promptOverride?: string) => {
+    const prompt = promptOverride || singleRevisionPrompts[resultId];
     if (!currentRun || !prompt?.trim()) return;
     const brand = brands.find(b => b.id === selectedBrandId);
 
     const result = currentRun.results.find(r => r.id === resultId);
     if (!result) return;
     const resultAspectRatio = getAspectRatio(result.topic);
+    const baseTopic = getBaseTopic(result.topic);
 
-    // Only mark this single image as revising
-    setRevisingIds(new Set([resultId]));
+    // Find siblings (other formats in same group)
+    const siblings = currentRun.results.filter(
+      r => r.id !== resultId && getBaseTopic(r.topic) === baseTopic
+    );
+
+    // Mark all group members as revising
+    const allIds = [resultId, ...siblings.map(s => s.id)];
+    setRevisingIds(new Set(allIds));
 
     const sourceImage = result.revisedImageBase64 || result.generatedImageBase64;
-    if (!sourceImage) return;
+    if (!sourceImage) { setRevisingIds(new Set()); return; }
+
+    let revisedMaster: string | null = null;
 
     try {
-      const revised = await reviseGeneratedImage(sourceImage, prompt, null, resultAspectRatio, brand?.logo);
+      // Step 1: Revise the target image (master)
+      revisedMaster = await reviseGeneratedImage(sourceImage, prompt, null, resultAspectRatio, brand?.logo);
       setCurrentRun(prev => {
         if (!prev) return prev;
         return {
           ...prev,
           results: prev.results.map(r =>
-            r.id === resultId ? { ...r, revisedImageBase64: revised } : r
+            r.id === resultId ? { ...r, revisedImageBase64: revisedMaster! } : r
           ),
         };
       });
+      setRevisingIds(prev => { const n = new Set(prev); n.delete(resultId); return n; });
     } catch (err: any) {
       console.error(`Single revision failed:`, err);
       alert(`Revizyon hatası: ${err.message}`);
+      setRevisingIds(new Set());
+      return;
+    }
+
+    // Step 2: Adapt revised master to sibling formats (consistent design language)
+    if (revisedMaster && siblings.length > 0) {
+      for (const sibling of siblings) {
+        const siblingAspectRatio = getAspectRatio(sibling.topic);
+        try {
+          const adaptedSibling = await adaptRevisedToFormat(
+            revisedMaster,
+            siblingAspectRatio || '9:16',
+            resultAspectRatio || '1:1',
+            brand?.logo
+          );
+          setCurrentRun(prev => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              results: prev.results.map(r =>
+                r.id === sibling.id ? { ...r, revisedImageBase64: adaptedSibling } : r
+              ),
+            };
+          });
+        } catch (err: any) {
+          console.error(`Adapt sibling failed for ${sibling.id}:`, err);
+        }
+        setRevisingIds(prev => { const n = new Set(prev); n.delete(sibling.id); return n; });
+      }
     }
 
     setRevisingIds(new Set());
-
-    setSingleRevisionPrompts(prev => ({ ...prev, [resultId]: '' }));
+    setSingleRevisionPrompts(prev => ({ ...prev, [resultId]: '', ...(promptOverride ? { [`group-${baseTopic}`]: '' } : {}) }));
     setExpandedRevision(null);
   };
 
@@ -1110,22 +1149,26 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
               )}
 
               {/* ═══ GROUPED RESULTS ═══ */}
-              <div className="space-y-4">
+              <div className="space-y-5">
                 {Object.entries(resultGroups).map(([baseTopic, group]) => {
                   const hasImages = group.some(r => r.generatedImageBase64 || r.revisedImageBase64);
                   const isGroupSelected = selectedGroups.has(baseTopic);
+                  const refImg = group[0]?.referenceImageId ? referenceImages.find(img => img.id === group[0].referenceImageId) : null;
+                  const isGroupRevisionOpen = expandedRevision === `group-${baseTopic}`;
+                  const groupRevisionKey = `group-${baseTopic}`;
+                  const isAnyRevising = group.some(r => revisingIds.has(r.id));
 
                   return (
                     <div
                       key={baseTopic}
-                      className={`border rounded-xl p-3 transition-all ${
+                      className={`border rounded-xl overflow-hidden transition-all ${
                         isGroupSelected
                           ? 'border-lumina-gold/50 bg-lumina-gold/5'
                           : 'border-lumina-800 bg-lumina-950'
                       }`}
                     >
-                      {/* Group header */}
-                      <div className="flex items-center gap-2 mb-2">
+                      {/* ─── Group header with reference thumbnail ─── */}
+                      <div className="flex items-center gap-3 px-3 py-2.5 bg-lumina-900/50 border-b border-lumina-800">
                         {hasImages && (
                           <button
                             onClick={() => toggleGroup(baseTopic)}
@@ -1138,130 +1181,103 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
                             {isGroupSelected && <Check size={10} className="text-lumina-950" />}
                           </button>
                         )}
-                        <p className="text-xs text-white font-medium truncate" title={baseTopic}>{baseTopic}</p>
-                        <span className="text-[10px] text-slate-600 shrink-0">{group.length} boyut</span>
+                        {refImg && (
+                          <img
+                            src={`data:image/png;base64,${refImg.base64}`}
+                            className="w-8 h-8 rounded object-cover border border-lumina-700 shrink-0"
+                            title={`Referans: ${refImg.name}`}
+                          />
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs text-white font-medium truncate" title={baseTopic}>{baseTopic}</p>
+                          <span className="text-[10px] text-slate-500">{group.length} boyut {group.length > 1 ? '— ayni tasarim dili' : ''}</span>
+                        </div>
+                        {/* Group actions */}
+                        {hasImages && (
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              onClick={() => {
+                                group.forEach(r => {
+                                  const img = r.revisedImageBase64 || r.generatedImageBase64;
+                                  if (img) downloadBase64Image(img, `${r.topic.slice(0, 30)}${r.revisedImageBase64 ? '-revised' : ''}.png`);
+                                });
+                              }}
+                              className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition-all"
+                              title="Grubu indir"
+                            >
+                              <Download size={12} />
+                            </button>
+                            <button
+                              onClick={() => setExpandedRevision(isGroupRevisionOpen ? null : groupRevisionKey)}
+                              className="p-1.5 rounded-lg bg-lumina-gold/10 hover:bg-lumina-gold/20 text-lumina-gold transition-all"
+                              title="Grubu revize et"
+                            >
+                              <Edit2 size={12} />
+                            </button>
+                          </div>
+                        )}
                       </div>
 
-                      {/* Images in this group */}
-                      <div className="grid grid-cols-2 lg:grid-cols-3 gap-2">
-                        {group.map((result) => {
-                          const displayImage = result.revisedImageBase64 || result.generatedImageBase64;
-                          const isThisRevising = revisingIds.has(result.id);
-                          const isExpanded = expandedRevision === result.id;
-                          const formatLabel = result.topic.match(/\[(.*?)\]/)?.[1];
+                      {/* ─── Group-level revision input ─── */}
+                      {isGroupRevisionOpen && (
+                        <div className="px-3 py-2.5 bg-lumina-950 border-b border-lumina-800">
+                          <div className="flex gap-1.5">
+                            <input
+                              type="text"
+                              value={singleRevisionPrompts[groupRevisionKey] || ''}
+                              onChange={e => setSingleRevisionPrompts(prev => ({ ...prev, [groupRevisionKey]: e.target.value }))}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter' && singleRevisionPrompts[groupRevisionKey]?.trim()) {
+                                  // Revise master (first in group), siblings auto-adapt
+                                  handleSingleRevision(group[0].id, singleRevisionPrompts[groupRevisionKey]);
+                                  setExpandedRevision(null);
+                                }
+                              }}
+                              placeholder="Tum boyutlari birlikte revize et... (master revize edilir, diger boyutlar uyumlanir)"
+                              className="flex-1 bg-lumina-900 border border-lumina-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-lumina-gold/50 placeholder-slate-600"
+                              autoFocus
+                            />
+                            <button
+                              onClick={() => {
+                                if (singleRevisionPrompts[groupRevisionKey]?.trim()) {
+                                  handleSingleRevision(group[0].id, singleRevisionPrompts[groupRevisionKey]);
+                                  setExpandedRevision(null);
+                                }
+                              }}
+                              disabled={!singleRevisionPrompts[groupRevisionKey]?.trim() || isAnyRevising}
+                              className="px-3 py-2 bg-lumina-gold/20 text-lumina-gold rounded-lg text-xs hover:bg-lumina-gold/30 disabled:opacity-30 transition-all flex items-center gap-1"
+                            >
+                              {isAnyRevising ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
+                              Revize
+                            </button>
+                          </div>
+                          <p className="text-[9px] text-slate-500 mt-1.5">
+                            Master boyut revize edilecek, diger {group.length - 1} boyut otomatik uyumlanacak — tutarli tasarim dili korunur
+                          </p>
+                        </div>
+                      )}
 
-                          return (
-                            <div key={result.id} className="bg-lumina-900 border border-lumina-800 rounded-lg overflow-hidden">
-                              {/* Image */}
-                              <div className="aspect-square relative">
-                                {isThisRevising ? (
-                                  <div className="w-full h-full flex items-center justify-center bg-lumina-900/50">
-                                    {displayImage && (
-                                      <img src={`data:image/png;base64,${displayImage}`} className="w-full h-full object-cover opacity-30 absolute inset-0" />
-                                    )}
-                                    <div className="text-center relative z-10">
-                                      <Loader2 size={24} className="text-lumina-gold animate-spin mx-auto" />
-                                      <p className="text-xs text-lumina-gold mt-2">Revize ediliyor...</p>
-                                    </div>
-                                  </div>
-                                ) : displayImage ? (
-                                  <img
-                                    src={`data:image/png;base64,${displayImage}`}
-                                    className="w-full h-full object-cover"
-                                    loading="lazy"
-                                  />
-                                ) : (
-                                  <div className="w-full h-full flex items-center justify-center">
-                                    {result.status === 'generating' || result.status === 'analyzing' || result.status === 'revising' ? (
-                                      <div className="text-center">
-                                        <Loader2 size={24} className="text-lumina-gold animate-spin mx-auto" />
-                                        <p className="text-xs text-slate-500 mt-2">
-                                          {result.status === 'generating' ? 'Üretiliyor...' :
-                                           result.status === 'revising' ? 'Revize ediliyor...' :
-                                           'Analiz ediliyor...'}
-                                        </p>
-                                      </div>
-                                    ) : result.status === 'failed' ? (
-                                      <div className="text-center px-3">
-                                        <XCircle size={24} className="text-red-400 mx-auto" />
-                                        <p className="text-xs text-red-400 mt-2">{result.error || 'Hata'}</p>
-                                      </div>
-                                    ) : (
-                                      <Clock size={24} className="text-slate-600" />
-                                    )}
-                                  </div>
-                                )}
+                      {/* ─── Side-by-side format comparison ─── */}
+                      <div className="p-3">
+                        <div className={`flex gap-3 ${group.length === 1 ? 'justify-center' : ''}`}>
+                          {group.map((result) => {
+                            const displayImage = result.revisedImageBase64 || result.generatedImageBase64;
+                            const isThisRevising = revisingIds.has(result.id);
+                            const isExpanded = expandedRevision === result.id;
+                            const formatLabel = result.topic.match(/\[(.*?)\]/)?.[1];
+                            // Parse aspect ratio for proper display
+                            const arMatch = formatLabel?.match(/(\d+):(\d+)/);
+                            const arW = arMatch ? parseInt(arMatch[1]) : 1;
+                            const arH = arMatch ? parseInt(arMatch[2]) : 1;
+                            const isVertical = arH > arW;
 
-                                {/* Format label */}
-                                {formatLabel && (
-                                  <div className="absolute top-2 right-2 bg-black/60 backdrop-blur-sm text-white text-[9px] font-medium px-1.5 py-0.5 rounded">
-                                    {formatLabel}
-                                  </div>
-                                )}
-
-                                {/* Revised badge */}
-                                {result.revisedImageBase64 && !isThisRevising && (
-                                  <div className="absolute top-2 left-2 bg-lumina-gold/90 text-lumina-950 text-[9px] font-bold px-1.5 py-0.5 rounded">
-                                    REVISED
-                                  </div>
-                                )}
-
-                                {/* Action overlay */}
-                                {displayImage && !isThisRevising && (
-                                  <div className="absolute inset-0 bg-black/60 opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                                    <button
-                                      onClick={(e) => { e.stopPropagation(); downloadBase64Image(displayImage!, `${result.topic.slice(0, 30)}${result.revisedImageBase64 ? '-revised' : ''}.png`); }}
-                                      className="bg-white/20 backdrop-blur-sm text-white px-3 py-1.5 rounded-lg text-xs flex items-center gap-1"
-                                    >
-                                      <Download size={12} /> İndir
-                                    </button>
-                                    <button
-                                      onClick={() => setExpandedRevision(isExpanded ? null : result.id)}
-                                      className="bg-lumina-gold/30 backdrop-blur-sm text-lumina-gold px-3 py-1.5 rounded-lg text-xs flex items-center gap-1"
-                                    >
-                                      <Edit2 size={12} /> Revize
-                                    </button>
-                                    <button
-                                      onClick={(e) => { e.stopPropagation(); handleQcSingle(result.id); }}
-                                      disabled={qcReviewingIds.has(result.id)}
-                                      className="bg-indigo-500/30 backdrop-blur-sm text-indigo-300 px-3 py-1.5 rounded-lg text-xs flex items-center gap-1 disabled:opacity-50"
-                                    >
-                                      {qcReviewingIds.has(result.id) ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />} KK
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
-
-                              {/* Single revision input — revises this + siblings */}
-                              {isExpanded && (
-                                <div className="p-2 bg-lumina-950 border-t border-lumina-800">
-                                  <div className="flex gap-1.5">
-                                    <input
-                                      type="text"
-                                      value={singleRevisionPrompts[result.id] || ''}
-                                      onChange={e => setSingleRevisionPrompts(prev => ({ ...prev, [result.id]: e.target.value }))}
-                                      onKeyDown={e => e.key === 'Enter' && handleSingleRevision(result.id)}
-                                      placeholder="Nasıl değişsin? (diğer boyutlar da uyumlu güncellenir)"
-                                      className="flex-1 bg-lumina-900 border border-lumina-800 rounded px-2 py-1.5 text-[11px] text-white focus:outline-none focus:border-lumina-gold/50 placeholder-slate-600"
-                                      autoFocus
-                                    />
-                                    <button
-                                      onClick={() => handleSingleRevision(result.id)}
-                                      disabled={!singleRevisionPrompts[result.id]?.trim()}
-                                      className="px-2 py-1.5 bg-lumina-gold/20 text-lumina-gold rounded text-[11px] hover:bg-lumina-gold/30 disabled:opacity-30 transition-all"
-                                    >
-                                      <Send size={10} />
-                                    </button>
-                                  </div>
-                                  {group.length > 1 && (
-                                    <p className="text-[9px] text-slate-600 mt-1">Bu boyut revize edilecek, diğer {group.length - 1} boyut da otomatik uyumlanacak</p>
-                                  )}
-                                </div>
-                              )}
-
-                              {/* Caption */}
-                              <div className="p-2">
-                                <div className="flex items-center gap-1">
+                            return (
+                              <div key={result.id} className="flex-1 min-w-0">
+                                {/* Format label header */}
+                                <div className="flex items-center justify-center gap-1.5 mb-2">
+                                  <span className="text-[10px] font-bold text-lumina-gold bg-lumina-gold/10 px-2 py-0.5 rounded-full">
+                                    {formatLabel || 'Orijinal'}
+                                  </span>
                                   <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${
                                     isThisRevising ? 'bg-lumina-gold animate-pulse' :
                                     result.status === 'completed' ? 'bg-emerald-400' :
@@ -1269,59 +1285,191 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
                                     result.status === 'pending' ? 'bg-slate-600' :
                                     'bg-blue-400 animate-pulse'
                                   }`} />
-                                  <span className="text-[10px] text-slate-500">
-                                    {isThisRevising ? 'Revize ediliyor...' :
-                                     result.revisedImageBase64 ? 'Revize edildi' :
-                                     result.status === 'completed' ? 'Tamamlandı' :
-                                     result.status === 'failed' ? 'Başarısız' :
-                                     result.status === 'generating' ? 'Üretiliyor' :
-                                     result.status === 'revising' ? 'Denetleniyor' :
-                                     result.status === 'analyzing' ? 'Analiz ediliyor' :
-                                     'Bekliyor'}
-                                  </span>
                                 </div>
 
-                                {/* QC Review Result */}
-                                {qcReviews[result.id] && (
-                                  <div className={`mt-1.5 p-1.5 rounded-lg border text-[10px] ${
-                                    qcReviews[result.id].passed
-                                      ? 'bg-emerald-500/10 border-emerald-500/20'
-                                      : 'bg-red-500/10 border-red-500/20'
-                                  }`}>
-                                    <div className="flex items-center justify-between mb-1">
-                                      <span className={`font-bold ${qcReviews[result.id].passed ? 'text-emerald-400' : 'text-red-400'}`}>
-                                        {qcReviews[result.id].score}/10 {qcReviews[result.id].passed ? '✓' : '✗'}
-                                      </span>
-                                      {!qcReviews[result.id].passed && qcReviews[result.id].revisionInstruction && (
-                                        <button
-                                          onClick={() => handleQcRevise(result.id)}
-                                          disabled={revisingIds.has(result.id)}
-                                          className="bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded text-[9px] hover:bg-indigo-500/30 disabled:opacity-50"
-                                        >
-                                          Revize Et
-                                        </button>
+                                {/* Image container with real aspect ratio */}
+                                <div
+                                  className="relative rounded-lg overflow-hidden bg-lumina-900 border border-lumina-800 mx-auto"
+                                  style={{
+                                    aspectRatio: `${arW}/${arH}`,
+                                    maxHeight: isVertical ? '400px' : '280px',
+                                  }}
+                                >
+                                  {isThisRevising ? (
+                                    <div className="w-full h-full flex items-center justify-center bg-lumina-900/50">
+                                      {displayImage && (
+                                        <img src={`data:image/png;base64,${displayImage}`} className="w-full h-full object-cover opacity-30 absolute inset-0" />
+                                      )}
+                                      <div className="text-center relative z-10">
+                                        <Loader2 size={24} className="text-lumina-gold animate-spin mx-auto" />
+                                        <p className="text-xs text-lumina-gold mt-2">Revize ediliyor...</p>
+                                      </div>
+                                    </div>
+                                  ) : displayImage ? (
+                                    <img
+                                      src={`data:image/png;base64,${displayImage}`}
+                                      className="w-full h-full object-cover"
+                                      loading="lazy"
+                                    />
+                                  ) : (
+                                    <div className="w-full h-full flex items-center justify-center">
+                                      {result.status === 'generating' || result.status === 'analyzing' || result.status === 'revising' ? (
+                                        <div className="text-center">
+                                          <Loader2 size={24} className="text-lumina-gold animate-spin mx-auto" />
+                                          <p className="text-xs text-slate-500 mt-2">
+                                            {result.status === 'generating' ? 'Uretiliyor...' :
+                                             result.status === 'revising' ? 'Revize ediliyor...' :
+                                             'Analiz ediliyor...'}
+                                          </p>
+                                        </div>
+                                      ) : result.status === 'failed' ? (
+                                        <div className="text-center px-3">
+                                          <XCircle size={24} className="text-red-400 mx-auto" />
+                                          <p className="text-xs text-red-400 mt-2">{result.error || 'Hata'}</p>
+                                        </div>
+                                      ) : (
+                                        <Clock size={24} className="text-slate-600" />
                                       )}
                                     </div>
-                                    {qcReviews[result.id].issues.length > 0 && (
-                                      <div className="text-slate-400 space-y-0.5">
-                                        {qcReviews[result.id].issues.map((issue, idx) => (
-                                          <p key={idx}>• {issue}</p>
-                                        ))}
-                                      </div>
+                                  )}
+
+                                  {/* Badges */}
+                                  {result.revisedImageBase64 && !isThisRevising && (
+                                    <div className="absolute top-2 left-2 bg-lumina-gold/90 text-lumina-950 text-[9px] font-bold px-1.5 py-0.5 rounded">
+                                      REVISED
+                                    </div>
+                                  )}
+
+                                  {/* QC score badge */}
+                                  {result.qcScore != null && result.qcScore > 0 && (
+                                    <div className={`absolute ${result.revisedImageBase64 ? 'top-8' : 'top-2'} left-2 text-[9px] font-bold px-1.5 py-0.5 rounded ${
+                                      result.qcPassed
+                                        ? 'bg-green-500/90 text-white'
+                                        : 'bg-red-500/90 text-white'
+                                    }`}
+                                      title={result.qcIssues?.join(', ') || ''}
+                                    >
+                                      QC {result.qcScore}/10{result.qcRetryCount ? ` (${result.qcRetryCount}R)` : ''}
+                                    </div>
+                                  )}
+
+                                  {/* Action overlay */}
+                                  {displayImage && !isThisRevising && (
+                                    <div className="absolute inset-0 bg-black/60 opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                                      <button
+                                        onClick={(e) => { e.stopPropagation(); downloadBase64Image(displayImage!, `${result.topic.slice(0, 30)}${result.revisedImageBase64 ? '-revised' : ''}.png`); }}
+                                        className="bg-white/20 backdrop-blur-sm text-white px-3 py-1.5 rounded-lg text-xs flex items-center gap-1"
+                                      >
+                                        <Download size={12} /> Indir
+                                      </button>
+                                      <button
+                                        onClick={() => setExpandedRevision(isExpanded ? null : result.id)}
+                                        className="bg-lumina-gold/30 backdrop-blur-sm text-lumina-gold px-3 py-1.5 rounded-lg text-xs flex items-center gap-1"
+                                      >
+                                        <Edit2 size={12} /> Revize
+                                      </button>
+                                      <button
+                                        onClick={(e) => { e.stopPropagation(); handleQcSingle(result.id); }}
+                                        disabled={qcReviewingIds.has(result.id)}
+                                        className="bg-indigo-500/30 backdrop-blur-sm text-indigo-300 px-3 py-1.5 rounded-lg text-xs flex items-center gap-1 disabled:opacity-50"
+                                      >
+                                        {qcReviewingIds.has(result.id) ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />} KK
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Single revision input — revises this + siblings */}
+                                {isExpanded && (
+                                  <div className="mt-2 p-2 bg-lumina-950 rounded-lg border border-lumina-800">
+                                    <div className="flex gap-1.5">
+                                      <input
+                                        type="text"
+                                        value={singleRevisionPrompts[result.id] || ''}
+                                        onChange={e => setSingleRevisionPrompts(prev => ({ ...prev, [result.id]: e.target.value }))}
+                                        onKeyDown={e => e.key === 'Enter' && handleSingleRevision(result.id)}
+                                        placeholder="Nasil degissin? (diger boyutlar da uyumlu guncellenir)"
+                                        className="flex-1 bg-lumina-900 border border-lumina-800 rounded px-2 py-1.5 text-[11px] text-white focus:outline-none focus:border-lumina-gold/50 placeholder-slate-600"
+                                        autoFocus
+                                      />
+                                      <button
+                                        onClick={() => handleSingleRevision(result.id)}
+                                        disabled={!singleRevisionPrompts[result.id]?.trim()}
+                                        className="px-2 py-1.5 bg-lumina-gold/20 text-lumina-gold rounded text-[11px] hover:bg-lumina-gold/30 disabled:opacity-30 transition-all"
+                                      >
+                                        <Send size={10} />
+                                      </button>
+                                    </div>
+                                    {group.length > 1 && (
+                                      <p className="text-[9px] text-slate-600 mt-1">Bu boyut revize edilecek, diger {group.length - 1} boyut da otomatik uyumlanacak</p>
                                     )}
                                   </div>
                                 )}
 
-                                {/* QC Reviewing indicator */}
-                                {qcReviewingIds.has(result.id) && (
-                                  <div className="mt-1.5 flex items-center gap-1 text-[10px] text-indigo-400">
-                                    <Loader2 size={10} className="animate-spin" /> Denetleniyor...
-                                  </div>
-                                )}
+                                {/* Status + QC info */}
+                                <div className="mt-2 text-center">
+                                  <span className="text-[10px] text-slate-500">
+                                    {isThisRevising ? 'Revize ediliyor...' :
+                                     result.revisedImageBase64 ? 'Revize edildi' :
+                                     result.status === 'completed' ? 'Tamamlandi' :
+                                     result.status === 'failed' ? 'Basarisiz' :
+                                     result.status === 'generating' ? 'Uretiliyor' :
+                                     result.status === 'revising' ? 'Denetleniyor' :
+                                     result.status === 'analyzing' ? 'Analiz ediliyor' :
+                                     'Bekliyor'}
+                                  </span>
+
+                                  {/* QC Review Result */}
+                                  {qcReviews[result.id] && (
+                                    <div className={`mt-1.5 p-1.5 rounded-lg border text-[10px] text-left ${
+                                      qcReviews[result.id].passed
+                                        ? 'bg-emerald-500/10 border-emerald-500/20'
+                                        : 'bg-red-500/10 border-red-500/20'
+                                    }`}>
+                                      <div className="flex items-center justify-between mb-1">
+                                        <span className={`font-bold ${qcReviews[result.id].passed ? 'text-emerald-400' : 'text-red-400'}`}>
+                                          {qcReviews[result.id].score}/10 {qcReviews[result.id].passed ? '✓' : '✗'}
+                                        </span>
+                                        {!qcReviews[result.id].passed && qcReviews[result.id].revisionInstruction && (
+                                          <button
+                                            onClick={() => handleQcRevise(result.id)}
+                                            disabled={revisingIds.has(result.id)}
+                                            className="bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded text-[9px] hover:bg-indigo-500/30 disabled:opacity-50"
+                                          >
+                                            Revize Et
+                                          </button>
+                                        )}
+                                      </div>
+                                      {qcReviews[result.id].issues.length > 0 && (
+                                        <div className="text-slate-400 space-y-0.5">
+                                          {qcReviews[result.id].issues.map((issue, idx) => (
+                                            <p key={idx}>• {issue}</p>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+
+                                  {/* QC Reviewing indicator */}
+                                  {qcReviewingIds.has(result.id) && (
+                                    <div className="mt-1.5 flex items-center justify-center gap-1 text-[10px] text-indigo-400">
+                                      <Loader2 size={10} className="animate-spin" /> Denetleniyor...
+                                    </div>
+                                  )}
+                                </div>
                               </div>
-                            </div>
-                          );
-                        })}
+                            );
+                          })}
+                        </div>
+
+                        {/* Connection indicator between formats */}
+                        {group.length > 1 && hasImages && (
+                          <div className="flex items-center justify-center mt-2 gap-2">
+                            <div className="h-px flex-1 bg-lumina-800" />
+                            <span className="text-[9px] text-slate-600 px-2">ayni tasarim dili</span>
+                            <div className="h-px flex-1 bg-lumina-800" />
+                          </div>
+                        )}
                       </div>
                     </div>
                   );
