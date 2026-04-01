@@ -93,13 +93,12 @@ export class PipelineService {
       { id: 'match', name: 'Akıllı Eşleştirme', description: 'Konular en uygun stillerle eşleştiriliyor', status: 'idle', progress: 0 },
       { id: 'brain', name: 'Kreatif Beyin', description: 'Direktifler + içerik planı + metin yazarlığı', status: 'idle', progress: 0 },
       { id: 'generate', name: 'Görsel Üretimi', description: `${totalItems} görsel üretiliyor (${formats.length} format)`, status: 'idle', progress: 0 },
-      { id: 'qc', name: 'Kalite Kontrol', description: 'Marka kurallarına uygunluk denetimi + otomatik revizyon', status: 'idle', progress: 0 },
       { id: 'save', name: 'Kayıt & Arşiv', description: 'Sonuçlar kaydediliyor', status: 'idle', progress: 0 },
     ];
 
     // Kreatif Beyin always runs — it's the intelligence layer
     if (!config.saveAsTemplate) {
-      steps[5].status = 'skipped';
+      steps[4].status = 'skipped';
     }
 
     const results: PipelineResult[] = [];
@@ -142,9 +141,6 @@ export class PipelineService {
 
       // ===== STEP 4: GENERATE (multi-format) =====
       await this.stepGenerate(config, brand, analyses, blueprints, matches, formats, signal, brainResults);
-
-      // ===== STEP 4.5: QUALITY CONTROL =====
-      await this.stepQualityControl(brand, signal);
 
       // ===== STEP 5: SAVE (optional) =====
       if (config.saveAsTemplate) {

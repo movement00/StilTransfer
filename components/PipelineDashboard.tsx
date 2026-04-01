@@ -10,7 +10,7 @@ import {
   PipelineImage, PipelineStepStatus, SavedTemplate, GeneratedAsset, TemplateFolder, ScoutResult
 } from '../types';
 import { pipelineService } from '../services/pipelineService';
-import { resizeImageToRawBase64, generatePipelineTopics, reviseGeneratedImage, adaptRevisedToFormat } from '../services/geminiService';
+import { resizeImageToRawBase64, generatePipelineTopics, reviseGeneratedImage, adaptRevisedToFormat, reviewCreativeQuality, QualityReview } from '../services/geminiService';
 import { downloadBase64Image, downloadMultipleImages } from '../services/downloadService';
 import { searchInspiration, downloadImage, scoreAndRankResults } from '../services/scoutService';
 
@@ -130,6 +130,11 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
   // AI Topics state
   const [isGeneratingTopics, setIsGeneratingTopics] = useState(false);
   const [topicCount, setTopicCount] = useState(5);
+
+  // Quality Control state
+  const [qcReviews, setQcReviews] = useState<Record<string, QualityReview>>({});
+  const [qcReviewingIds, setQcReviewingIds] = useState<Set<string>>(new Set());
+  const [qcBulkRunning, setQcBulkRunning] = useState(false);
 
   // Scout Picker state
   const [showScoutPicker, setShowScoutPicker] = useState<'reference' | 'product' | null>(null);
@@ -547,6 +552,48 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
     setSelectedGroups(new Set());
   };
 
+  // ═══ Quality Control Handlers ═══
+  const handleQcSingle = async (resultId: string) => {
+    const result = currentRun?.results.find(r => r.id === resultId);
+    const brand = brands.find(b => b.id === selectedBrandId);
+    const imageData = result?.revisedImageBase64 || result?.generatedImageBase64;
+    if (!imageData || !brand) return;
+
+    setQcReviewingIds(prev => new Set(prev).add(resultId));
+    try {
+      const review = await reviewCreativeQuality(imageData, brand.name);
+      setQcReviews(prev => ({ ...prev, [resultId]: review }));
+    } catch (err: any) {
+      setQcReviews(prev => ({ ...prev, [resultId]: { score: 0, passed: false, issues: [`Denetim hatası: ${err.message}`], revisionInstruction: null } }));
+    }
+    setQcReviewingIds(prev => { const next = new Set(prev); next.delete(resultId); return next; });
+  };
+
+  const handleQcBulk = async () => {
+    if (!currentRun) return;
+    const brand = brands.find(b => b.id === selectedBrandId);
+    if (!brand) return;
+
+    const completedResults = currentRun.results.filter(r => (r.generatedImageBase64 || r.revisedImageBase64) && !qcReviews[r.id]);
+    if (completedResults.length === 0) return;
+
+    setQcBulkRunning(true);
+    for (const result of completedResults) {
+      await handleQcSingle(result.id);
+    }
+    setQcBulkRunning(false);
+  };
+
+  const handleQcRevise = async (resultId: string) => {
+    const review = qcReviews[resultId];
+    if (!review?.revisionInstruction) return;
+    // Use existing single revision logic with QC's instruction
+    setSingleRevisionPrompts(prev => ({ ...prev, [resultId]: review.revisionInstruction! }));
+    await handleSingleRevision(resultId);
+    // Clear the review after revision
+    setQcReviews(prev => { const next = { ...prev }; delete next[resultId]; return next; });
+  };
+
   const handleSingleRevision = async (resultId: string) => {
     const prompt = singleRevisionPrompts[resultId];
     if (!currentRun || !prompt?.trim()) return;
@@ -612,9 +659,14 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
                 <RotateCcw size={16} /> Sıfırla
               </button>
               {currentRun.status === 'completed' && (
-                <button onClick={downloadAllResults} disabled={isDownloadingAll} className="flex items-center gap-2 px-5 py-2.5 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-xl hover:bg-emerald-500/30 disabled:opacity-50 transition-all">
-                  {isDownloadingAll ? <><Loader2 size={16} className="animate-spin" /> İndiriliyor...</> : <><Download size={16} /> Tümünü İndir</>}
-                </button>
+                <>
+                  <button onClick={downloadAllResults} disabled={isDownloadingAll} className="flex items-center gap-2 px-5 py-2.5 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-xl hover:bg-emerald-500/30 disabled:opacity-50 transition-all">
+                    {isDownloadingAll ? <><Loader2 size={16} className="animate-spin" /> İndiriliyor...</> : <><Download size={16} /> Tümünü İndir</>}
+                  </button>
+                  <button onClick={handleQcBulk} disabled={qcBulkRunning} className="flex items-center gap-2 px-5 py-2.5 bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 rounded-xl hover:bg-indigo-500/30 disabled:opacity-50 transition-all">
+                    {qcBulkRunning ? <><Loader2 size={16} className="animate-spin" /> Denetleniyor...</> : <><CheckCircle2 size={16} /> Toplu Kalite Kontrol</>}
+                  </button>
+                </>
               )}
             </>
           ) : null}
@@ -1169,6 +1221,13 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
                                     >
                                       <Edit2 size={12} /> Revize
                                     </button>
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); handleQcSingle(result.id); }}
+                                      disabled={qcReviewingIds.has(result.id)}
+                                      className="bg-indigo-500/30 backdrop-blur-sm text-indigo-300 px-3 py-1.5 rounded-lg text-xs flex items-center gap-1 disabled:opacity-50"
+                                    >
+                                      {qcReviewingIds.has(result.id) ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />} KK
+                                    </button>
                                   </div>
                                 )}
                               </div>
@@ -1221,6 +1280,44 @@ const PipelineDashboard: React.FC<PipelineDashboardProps> = ({
                                      'Bekliyor'}
                                   </span>
                                 </div>
+
+                                {/* QC Review Result */}
+                                {qcReviews[result.id] && (
+                                  <div className={`mt-1.5 p-1.5 rounded-lg border text-[10px] ${
+                                    qcReviews[result.id].passed
+                                      ? 'bg-emerald-500/10 border-emerald-500/20'
+                                      : 'bg-red-500/10 border-red-500/20'
+                                  }`}>
+                                    <div className="flex items-center justify-between mb-1">
+                                      <span className={`font-bold ${qcReviews[result.id].passed ? 'text-emerald-400' : 'text-red-400'}`}>
+                                        {qcReviews[result.id].score}/10 {qcReviews[result.id].passed ? '✓' : '✗'}
+                                      </span>
+                                      {!qcReviews[result.id].passed && qcReviews[result.id].revisionInstruction && (
+                                        <button
+                                          onClick={() => handleQcRevise(result.id)}
+                                          disabled={revisingIds.has(result.id)}
+                                          className="bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded text-[9px] hover:bg-indigo-500/30 disabled:opacity-50"
+                                        >
+                                          Revize Et
+                                        </button>
+                                      )}
+                                    </div>
+                                    {qcReviews[result.id].issues.length > 0 && (
+                                      <div className="text-slate-400 space-y-0.5">
+                                        {qcReviews[result.id].issues.map((issue, idx) => (
+                                          <p key={idx}>• {issue}</p>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+
+                                {/* QC Reviewing indicator */}
+                                {qcReviewingIds.has(result.id) && (
+                                  <div className="mt-1.5 flex items-center gap-1 text-[10px] text-indigo-400">
+                                    <Loader2 size={10} className="animate-spin" /> Denetleniyor...
+                                  </div>
+                                )}
                               </div>
                             </div>
                           );
